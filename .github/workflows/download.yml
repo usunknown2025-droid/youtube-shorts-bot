@@ -1,0 +1,39 @@
+name: YouTube Video Download
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'YouTube Video URL'
+        required: true
+        type: string
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yt-dlp and FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install yt-dlp
+
+      - name: Download Video
+        run: |
+          yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
+            --merge-output-format mp4 \
+            -o "video.mp4" \
+            "${{ github.event.inputs.video_url }}"
+
+      - name: Check file
+        run: ls -la
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloaded-video
+          path: video.mp4
+          retention-days: 1
