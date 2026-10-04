@@ -29,11 +29,16 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          pip install --upgrade yt-dlp faster-whisper requests
+
+      - name: Install yt-dlp (nightly)
+        run: pip install --upgrade --pre yt-dlp
+
+      - name: Install AI dependencies
+        run: pip install faster-whisper requests
 
       - name: Create cookies file
         run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
@@ -43,6 +48,7 @@ jobs:
           yt-dlp --js-runtimes node \
             --remote-components ejs:github \
             --cookies cookies.txt \
+            --extractor-args "youtube:player_client=default,web_safari" \
             -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
             --merge-output-format mp4 \
             -o "video.mp4" \
