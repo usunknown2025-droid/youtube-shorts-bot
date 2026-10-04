@@ -24,7 +24,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-          pip install yt-dlp
+          pip install --upgrade yt-dlp
 
       - name: Create cookies file
         run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
@@ -32,6 +32,7 @@ jobs:
       - name: Download Video
         run: |
           yt-dlp --js-runtimes node \
+            --remote-components ejs:github \
             --cookies cookies.txt \
             -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
             --merge-output-format mp4 \
