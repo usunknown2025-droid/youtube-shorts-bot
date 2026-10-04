@@ -152,7 +152,7 @@ jobs:
       - name: Generate English Commentary and TTS
         run: |
           python3 -c "
-          import json, os, requests, subprocess, time
+          import json, os, requests, subprocess, time, re as _re
           
           with open('moment.json') as f:
               moment = json.load(f)
@@ -189,9 +189,39 @@ jobs:
               commentary = 'Check out this amazing moment!'
               print(f'Fallback commentary: {commentary}')
           
-          # Generate TTS
-          subprocess.run(['edge-tts', '--voice', '${{ github.event.inputs.voice_name }}', '--text', commentary, '--write-media', 'tts.mp3'])
-          print('TTS ready')
+          # Clean commentary
+          commentary = _re.sub(r'[\"\'\\n\\r]', ' ', commentary)
+          commentary = commentary.strip()[:300]
+          if not commentary:
+              commentary = 'Check out this amazing moment!'
+          
+          # Write to file
+          with open('commentary.txt', 'w', encoding='utf-8') as f:
+              f.write(commentary)
+          print(f'Commentary file created: {commentary}')
+          
+          # Generate TTS with retry
+          tts_ok = False
+          for attempt in range(3):
+              try:
+                  result = subprocess.run(
+                      ['edge-tts', '--voice', '${{ github.event.inputs.voice_name }}',
+                       '--file', 'commentary.txt', '--write-media', 'tts.mp3'],
+                      capture_output=True, text=True, timeout=60
+                  )
+                  print(f'TTS attempt {attempt+1} stderr: {result.stderr[:500]}')
+                  if os.path.exists('tts.mp3') and os.path.getsize('tts.mp3') > 1000:
+                      tts_ok = True
+                      print(f'TTS ready ({os.path.getsize(\"tts.mp3\")} bytes)')
+                      break
+              except Exception as e:
+                  print(f'TTS error: {e}')
+                  time.sleep(3)
+          
+          if not tts_ok:
+              print('TTS failed, creating silence instead')
+              subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+                              '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', 'tts.mp3'])
           
           # Generate SRT
           def format_time(seconds):
