@@ -66,7 +66,7 @@ jobs:
           python3 -c "
           from faster_whisper import WhisperModel
           model = WhisperModel('tiny', device='cpu', compute_type='int8')
-          segments, _ = model.transcribe('audio.wav', language='hi')
+          segments, _ = model.transcribe('audio.wav', task='translate')
           lines = []
           for s in segments:
               lines.append(f'{s.start:.1f}-{s.end:.1f}: {s.text}')
@@ -82,12 +82,12 @@ jobs:
           with open('transcript.txt', encoding='utf-8') as f:
               transcript = f.read()
           api_key = os.environ['GEMINI_API_KEY']
-          prompt = f'''Yeh ek video ka timestamped transcript hai. Isme se sabse interesting/viral 30-second segment dhoondo. Sirf JSON format mein jawab do, kuch aur nahi likhna: {{\"start\": <start_seconds>, \"end\": <end_seconds>, \"reason\": \"<short reason>\"}}
+          prompt = f'''Here is a timestamped transcript of a video. Find the most interesting/viral 45-second segment. Reply ONLY in JSON format, nothing else: {{\"start\": <start_seconds>, \"end\": <end_seconds>, \"reason\": \"<short reason>\"}}
           
           Transcript:
           {transcript}'''
           
-          url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}'
+          url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}'
           payload = {'contents': [{'parts': [{'text': prompt}]}]}
           
           try:
@@ -113,7 +113,7 @@ jobs:
               print(f'Error: {e}')
               print('Fallback used')
               with open('moment.json', 'w') as f:
-                  json.dump({'start': 0, 'end': 30, 'reason': 'fallback'}, f)
+                  json.dump({'start': 0, 'end': 45, 'reason': 'fallback'}, f)
           "
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -133,7 +133,7 @@ jobs:
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendVideo" \
             -F "chat_id=${{ github.event.inputs.chat_id }}" \
             -F "video=@shorts.mp4" \
-            -F "caption=✅ Yeh raha tumhara viral Short! 🎬"
+            -F "caption=✅ Here is your viral Short! 🎬"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
