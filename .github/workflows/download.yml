@@ -63,7 +63,7 @@ jobs:
           yt-dlp --js-runtimes deno \
             --remote-components ejs:github \
             --cookies cookies.txt \
-            -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
+            -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]" \
             --merge-output-format mp4 \
             -o "video.mp4" \
             "${{ github.event.inputs.video_url }}"
@@ -238,8 +238,8 @@ jobs:
           DURATION=${{ github.event.inputs.duration }}
           
           ffmpeg -ss $START -t $DURATION -i video.mp4 -i tts.mp3 \
-            -filter_complex "[0:v]crop=ih*9/16:ih,scale=1080:1920,subtitles=subs.srt:force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=50'[v];[0:a]volume=0.2[bg];[1:a]volume=1.0[tts];[bg][tts]amix=inputs=2:duration=first[aout]" \
-            -map "[v]" -map "[aout]" -c:v libx264 -crf 23 -c:a aac shorts.mp4
+            -filter_complex "[0:v]crop=ih*9/16:ih,scale=1080:1920:flags=lanczos,subtitles=subs.srt:force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=50'[v];[0:a]volume=0.2[bg];[1:a]volume=1.0[tts];[bg][tts]amix=inputs=2:duration=first[aout]" \
+            -map "[v]" -map "[aout]" -c:v libx264 -preset slow -crf 18 -c:a aac -b:a 192k shorts.mp4
 
       - name: Send Video to Telegram
         run: |
