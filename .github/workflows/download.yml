@@ -53,7 +53,7 @@ jobs:
         run: pip install --upgrade --pre yt-dlp
 
       - name: Install AI dependencies
-        run: pip install faster-whisper requests edge-tts
+        run: pip install faster-whisper requests edge-tts gtts
 
       - name: Create cookies file
         run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
@@ -153,8 +153,7 @@ jobs:
         run: |
           cat > tts_gen.py << 'PYEOF'
           import json, os, requests, subprocess, time, re
-          import asyncio
-          import edge_tts
+          from gtts import gTTS
 
           with open('moment.json') as f:
               moment = json.load(f)
@@ -188,21 +187,16 @@ jobs:
           if not commentary:
               commentary = 'Check out this amazing moment!'
 
-          commentary = re.sub(r'[\"\'\n\r]', ' ', commentary).strip()[:300]
+          commentary = re.sub(r'["\'\n\r]', ' ', commentary).strip()[:300]
           if not commentary:
               commentary = 'Check out this amazing moment!'
           print('Final commentary: ' + commentary)
 
-          voice = os.environ.get('VOICE_NAME', 'en-US-DavisNeural')
-
-          async def gen_tts():
-              comm = edge_tts.Communicate(commentary, voice)
-              await comm.save('tts.mp3')
-
           tts_ok = False
           for attempt in range(3):
               try:
-                  asyncio.run(gen_tts())
+                  tts = gTTS(text=commentary, lang='en', slow=False)
+                  tts.save('tts.mp3')
                   if os.path.exists('tts.mp3') and os.path.getsize('tts.mp3') > 1000:
                       tts_ok = True
                       print('TTS OK: ' + str(os.path.getsize('tts.mp3')) + ' bytes')
@@ -237,7 +231,6 @@ jobs:
           python3 tts_gen.py
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          VOICE_NAME: ${{ github.event.inputs.voice_name }}
 
       - name: Cut, Mix Audio, and Burn Captions
         run: |
