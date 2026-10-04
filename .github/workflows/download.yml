@@ -43,18 +43,25 @@ jobs:
             -o "video.mp4" \
             "${{ github.event.inputs.video_url }}"
 
-      - name: Send Telegram Notification
+      - name: Create 9:16 Short Clip
         run: |
-          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-            -d "chat_id=${{ github.event.inputs.chat_id }}" \
-            -d "text=✅ Video download ho gayi bhai! Ab main ise process karta hoon."
+          ffmpeg -i video.mp4 -t 30 \
+            -vf "crop=ih*9/16:ih,scale=1080:1920" \
+            -c:v libx264 -crf 23 -c:a aac \
+            shorts.mp4
 
-      - name: Check file
-        run: ls -la
+      - name: Send Video to Telegram
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendVideo" \
+            -F "chat_id=${{ github.event.inputs.chat_id }}" \
+            -F "video=@shorts.mp4" \
+            -F "caption=✅ Yeh raha tumhara 9:16 Short! Ab main ise process karta hoon."
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: downloaded-video
-          path: video.mp4
+          path: |
+            video.mp4
+            shorts.mp4
           retention-days: 1
