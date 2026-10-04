@@ -29,6 +29,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install Deno
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+
       - name: Install FFmpeg
         run: |
           sudo apt-get update
@@ -45,10 +50,9 @@ jobs:
 
       - name: Download Video
         run: |
-          yt-dlp --js-runtimes node \
+          yt-dlp --js-runtimes deno \
             --remote-components ejs:github \
             --cookies cookies.txt \
-            --extractor-args "youtube:player_client=default,web_safari" \
             -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
             --merge-output-format mp4 \
             -o "video.mp4" \
