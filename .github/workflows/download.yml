@@ -86,21 +86,34 @@ jobs:
           
           Transcript:
           {transcript}'''
-          url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}'
+          
+          url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}'
           payload = {'contents': [{'parts': [{'text': prompt}]}]}
-          r = requests.post(url, json=payload)
-          result = r.json()
-          text = result['candidates'][0]['content']['parts'][0]['text']
-          match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
-          if match:
-              moment = json.loads(match.group())
-              with open('moment.json', 'w') as f:
-                  json.dump(moment, f)
-              print(f'Viral moment: {moment}')
-          else:
+          
+          try:
+              r = requests.post(url, json=payload)
+              print('Status Code:', r.status_code)
+              result = r.json()
+              print('Response:', result)
+              
+              if 'candidates' in result:
+                  text = result['candidates'][0]['content']['parts'][0]['text']
+                  match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+                  if match:
+                      moment = json.loads(match.group())
+                      with open('moment.json', 'w') as f:
+                          json.dump(moment, f)
+                      print(f'Viral moment: {moment}')
+                  else:
+                      raise ValueError('No JSON found in response')
+              else:
+                  raise KeyError('candidates not found')
+                  
+          except Exception as e:
+              print(f'Error: {e}')
+              print('Fallback used')
               with open('moment.json', 'w') as f:
                   json.dump({'start': 0, 'end': 30, 'reason': 'fallback'}, f)
-              print('Fallback used')
           "
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
