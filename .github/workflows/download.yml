@@ -209,15 +209,9 @@ jobs:
               print('TTS failed - creating silence')
               subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', 'tts.mp3'])
 
-          # Get TTS audio duration using ffprobe
-          probe = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-                                  '-of', 'default=noprint_wrappers=1:nokey=1', 'tts.mp3'],
-                                 capture_output=True, text=True)
-          try:
-              tts_duration = float(probe.stdout.strip())
-          except:
-              tts_duration = 10.0
-          print('TTS duration: ' + str(tts_duration) + ' seconds')
+          # Use video duration instead of TTS duration
+          video_duration = float(os.environ.get('VIDEO_DURATION', '45'))
+          print('Video duration: ' + str(video_duration) + ' seconds')
 
           # Split commentary into small chunks (3 words each)
           words = commentary.split()
@@ -227,7 +221,7 @@ jobs:
               chunks.append(' '.join(words[i:i+chunk_size]))
 
           total_chunks = len(chunks)
-          chunk_duration = tts_duration / total_chunks if total_chunks > 0 else 1.0
+          print('Total chunks: ' + str(total_chunks))
 
           def format_time(seconds):
               hrs = int(seconds // 3600)
@@ -237,17 +231,20 @@ jobs:
               return '%02d:%02d:%02d,%03d' % (hrs, mins, secs, ms)
 
           srt_lines = []
-          for idx, chunk in enumerate(chunks):
-              s = idx * chunk_duration
-              e = (idx + 1) * chunk_duration
-              srt_lines.append(str(idx + 1) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + chunk + '\n')
+          if total_chunks > 0:
+              chunk_duration = video_duration / total_chunks
+              for idx, chunk in enumerate(chunks):
+                  s = idx * chunk_duration
+                  e = (idx + 1) * chunk_duration
+                  srt_lines.append(str(idx + 1) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + chunk + '\n')
           with open('subs.srt', 'w', encoding='utf-8') as f:
               f.write('\n'.join(srt_lines))
-          print('SRT ready with ' + str(total_chunks) + ' chunks synced to voice')
+          print('SRT ready with ' + str(total_chunks) + ' chunks across full video')
           PYEOF
           python3 tts_gen.py
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VIDEO_DURATION: ${{ github.event.inputs.duration }}
 
       - name: Cut, Mix Audio, and Burn Captions
         run: |
