@@ -11,6 +11,16 @@ on:
         description: 'Telegram Chat ID'
         required: true
         type: string
+      duration:
+        description: 'Duration in seconds'
+        required: true
+        default: '45'
+        type: string
+      voice_name:
+        description: 'Voice Name'
+        required: true
+        default: 'en-US-DavisNeural'
+        type: string
 
 jobs:
   download:
@@ -37,13 +47,13 @@ jobs:
       - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg libass9
 
       - name: Install yt-dlp (nightly)
         run: pip install --upgrade --pre yt-dlp
 
       - name: Install AI dependencies
-        run: pip install faster-whisper requests
+        run: pip install faster-whisper requests edge-tts
 
       - name: Create cookies file
         run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
@@ -61,17 +71,22 @@ jobs:
       - name: Extract Audio
         run: ffmpeg -i video.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 audio.wav
 
-      - name: Transcribe with Whisper
+      - name: Transcribe with Whisper (English)
         run: |
           python3 -c "
+          import json
           from faster_whisper import WhisperModel
           model = WhisperModel('tiny', device='cpu', compute_type='int8')
           segments, _ = model.transcribe('audio.wav', task='translate')
           lines = []
+          seg_data = []
           for s in segments:
               lines.append(f'{s.start:.1f}-{s.end:.1f}: {s.text}')
+              seg_data.append({'start': s.start, 'end': s.end, 'text': s.text})
           with open('transcript.txt', 'w', encoding='utf-8') as f:
               f.write('\n'.join(lines))
+          with open('segments.json', 'w', encoding='utf-8') as f:
+              json.dump(seg_data, f)
           print('Transcript ready')
           "
 
@@ -82,11 +97,12 @@ jobs:
           with open('transcript.txt', encoding='utf-8') as f:
               transcript = f.read()
           api_key = os.environ['GEMINI_API_KEY']
+          duration = int('${{ github.event.inputs.duration }}')
           prompt = f'''You are a viral Shorts editor. Below is a timestamped transcript of a YouTube video.
           
-          Your task: Find the SINGLE most interesting, emotional, funny, shocking, or viral-worthy 45-second segment.
+          Your task: Find the SINGLE most interesting, emotional, funny, shocking, or viral-worthy segment of about {duration} seconds.
           Focus on moments where the speaker says something surprising, emotional, controversial, or highly engaging.
-          Do NOT just pick the first 45 seconds. Look for the PEAK moment.
+          Do NOT just pick the first {duration} seconds. Look for the PEAK moment.
           
           Reply ONLY in JSON format, nothing else: {{\"start\": <start_seconds>, \"end\": <end_seconds>, \"reason\": \"<why this is viral>\"}}
           
@@ -128,27 +144,93 @@ jobs:
           if not success:
               print('All models failed - Fallback used')
               with open('moment.json', 'w') as f:
-                  json.dump({'start': 0, 'end': 45, 'reason': 'fallback'}, f)
+                  json.dump({'start': 0, 'end': duration, 'reason': 'fallback'}, f)
           "
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
-      - name: Cut Viral Segment in 9:16
+      - name: Generate English Commentary and TTS
+        run: |
+          python3 -c "
+          import json, os, requests, subprocess, time
+          
+          with open('moment.json') as f:
+              moment = json.load(f)
+          start = float(moment['start'])
+          end = float(moment['end'])
+          
+          with open('segments.json', encoding='utf-8') as f:
+              segments = json.load(f)
+              
+          moment_text = ' '.join([s['text'] for s in segments if s['start'] >= start and s['end'] <= end])
+          
+          api_key = os.environ['GEMINI_API_KEY']
+          prompt = f'''Here is a transcript of a video segment. Write a short, engaging English commentary/script (max 40 words) that can be used as a voiceover for this Short. Make it exciting and hook the viewer. Only reply with the English text, nothing else.
+          
+          Transcript: {moment_text}'''
+          
+          models = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest']
+          commentary = None
+          
+          for model_name in models:
+              try:
+                  url = f'https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}'
+                  r = requests.post(url, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=60)
+                  result = r.json()
+                  if 'candidates' in result:
+                      commentary = result['candidates'][0]['content']['parts'][0]['text'].strip()
+                      print(f'Commentary from {model_name}: {commentary}')
+                      break
+              except Exception as e:
+                  print(f'Error with {model_name}: {e}')
+                  time.sleep(3)
+          
+          if not commentary:
+              commentary = 'Check out this amazing moment!'
+              print(f'Fallback commentary: {commentary}')
+          
+          # Generate TTS
+          subprocess.run(['edge-tts', '--voice', '${{ github.event.inputs.voice_name }}', '--text', commentary, '--write-media', 'tts.mp3'])
+          print('TTS ready')
+          
+          # Generate SRT
+          def format_time(seconds):
+              hrs = int(seconds // 3600)
+              mins = int((seconds % 3600) // 60)
+              secs = int(seconds % 60)
+              ms = int((seconds - int(seconds)) * 1000)
+              return f'{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}'
+              
+          srt_lines = []
+          idx = 1
+          for seg in segments:
+              if seg['start'] >= start and seg['end'] <= end:
+                  s = seg['start'] - start
+                  e = seg['end'] - start
+                  srt_lines.append(f'{idx}\\n{format_time(s)} --> {format_time(e)}\\n{seg[\"text\"]}\\n')
+                  idx += 1
+          with open('subs.srt', 'w', encoding='utf-8') as f:
+              f.write('\\n'.join(srt_lines))
+          print('SRT ready')
+          "
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Cut, Mix Audio, and Burn Captions
         run: |
           START=$(python3 -c "import json; print(json.load(open('moment.json'))['start'])")
-          END=$(python3 -c "import json; print(json.load(open('moment.json'))['end'])")
-          DURATION=$(python3 -c "import json; m=json.load(open('moment.json')); print(float(m['end']) - float(m['start']))")
-          ffmpeg -i video.mp4 -ss $START -t $DURATION \
-            -vf "crop=ih*9/16:ih,scale=1080:1920" \
-            -c:v libx264 -crf 23 -c:a aac \
-            shorts.mp4
+          DURATION=${{ github.event.inputs.duration }}
+          
+          ffmpeg -ss $START -t $DURATION -i video.mp4 -i tts.mp3 \
+            -filter_complex "[0:v]crop=ih*9/16:ih,scale=1080:1920,subtitles=subs.srt:force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=50'[v];[0:a]volume=0.2[bg];[1:a]volume=1.0[tts];[bg][tts]amix=inputs=2:duration=first[aout]" \
+            -map "[v]" -map "[aout]" -c:v libx264 -crf 23 -c:a aac shorts.mp4
 
       - name: Send Video to Telegram
         run: |
           curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendVideo" \
             -F "chat_id=${{ github.event.inputs.chat_id }}" \
             -F "video=@shorts.mp4" \
-            -F "caption=✅ Here is your viral Short! 🎬"
+            -F "caption=✅ Here is your viral Short! 🎬 Voice: ${{ github.event.inputs.voice_name }} | Duration: ${{ github.event.inputs.duration }}s"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
