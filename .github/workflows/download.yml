@@ -26,11 +26,13 @@ jobs:
           sudo apt-get install -y ffmpeg
           pip install yt-dlp
 
+      - name: Create cookies file
+        run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
+
       - name: Download Video
         run: |
           yt-dlp --js-runtimes node \
-            --extractor-args "youtube:player_client=ios,web_embedded" \
-            --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            --cookies cookies.txt \
             -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
             --merge-output-format mp4 \
             -o "video.mp4" \
