@@ -151,100 +151,93 @@ jobs:
 
       - name: Generate English Commentary and TTS
         run: |
-          python3 -c "
-          import json, os, requests, subprocess, time, re as _re
-          
+          cat > tts_gen.py << 'PYEOF'
+          import json, os, requests, subprocess, time, re
+          import asyncio
+          import edge_tts
+
           with open('moment.json') as f:
               moment = json.load(f)
           start = float(moment['start'])
           end = float(moment['end'])
-          
+
           with open('segments.json', encoding='utf-8') as f:
               segments = json.load(f)
-              
+
           moment_text = ' '.join([s['text'] for s in segments if s['start'] >= start and s['end'] <= end])
-          
+
           api_key = os.environ['GEMINI_API_KEY']
-          prompt = f'''Here is a transcript of a video segment. Write a short, engaging English commentary/script (max 40 words) that can be used as a voiceover for this Short. Make it exciting and hook the viewer. Only reply with the English text, nothing else.
-          
-          Transcript: {moment_text}'''
-          
+          prompt = 'Here is a transcript of a video segment. Write a short, engaging English commentary/script (max 40 words) that can be used as a voiceover for this Short. Make it exciting and hook the viewer. Only reply with the English text, nothing else.\n\nTranscript: ' + moment_text
+
           models = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest']
           commentary = None
-          
+
           for model_name in models:
               try:
-                  url = f'https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}'
+                  url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model_name + ':generateContent?key=' + api_key
                   r = requests.post(url, json={'contents': [{'parts': [{'text': prompt}]}]}, timeout=60)
                   result = r.json()
                   if 'candidates' in result:
                       commentary = result['candidates'][0]['content']['parts'][0]['text'].strip()
-                      print(f'Commentary from {model_name}: {commentary}')
+                      print('Commentary: ' + commentary)
                       break
               except Exception as e:
-                  print(f'Error with {model_name}: {e}')
+                  print('Gemini error: ' + str(e))
                   time.sleep(3)
-          
+
           if not commentary:
               commentary = 'Check out this amazing moment!'
-              print(f'Fallback commentary: {commentary}')
-          
-          # Clean commentary
-          commentary = _re.sub(r'[\"\'\\n\\r]', ' ', commentary)
-          commentary = commentary.strip()[:300]
+
+          commentary = re.sub(r'[\"\'\n\r]', ' ', commentary).strip()[:300]
           if not commentary:
               commentary = 'Check out this amazing moment!'
-          
-          # Write to file
-          with open('commentary.txt', 'w', encoding='utf-8') as f:
-              f.write(commentary)
-          print(f'Commentary file created: {commentary}')
-          
-          # Generate TTS with retry
+          print('Final commentary: ' + commentary)
+
+          voice = os.environ.get('VOICE_NAME', 'en-US-DavisNeural')
+
+          async def gen_tts():
+              comm = edge_tts.Communicate(commentary, voice)
+              await comm.save('tts.mp3')
+
           tts_ok = False
           for attempt in range(3):
               try:
-                  result = subprocess.run(
-                      ['edge-tts', '--voice', '${{ github.event.inputs.voice_name }}',
-                       '--file', 'commentary.txt', '--write-media', 'tts.mp3'],
-                      capture_output=True, text=True, timeout=60
-                  )
-                  print(f'TTS attempt {attempt+1} stderr: {result.stderr[:500]}')
+                  asyncio.run(gen_tts())
                   if os.path.exists('tts.mp3') and os.path.getsize('tts.mp3') > 1000:
                       tts_ok = True
-                      print(f'TTS ready ({os.path.getsize(\"tts.mp3\")} bytes)')
+                      print('TTS OK: ' + str(os.path.getsize('tts.mp3')) + ' bytes')
                       break
               except Exception as e:
-                  print(f'TTS error: {e}')
+                  print('TTS attempt ' + str(attempt+1) + ' failed: ' + str(e))
                   time.sleep(3)
-          
+
           if not tts_ok:
-              print('TTS failed, creating silence instead')
-              subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-                              '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', 'tts.mp3'])
-          
-          # Generate SRT
+              print('TTS failed - creating silence')
+              subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', 'tts.mp3'])
+
           def format_time(seconds):
               hrs = int(seconds // 3600)
               mins = int((seconds % 3600) // 60)
               secs = int(seconds % 60)
               ms = int((seconds - int(seconds)) * 1000)
-              return f'{hrs:02d}:{mins:02d}:{secs:02d},{ms:03d}'
-              
+              return '%02d:%02d:%02d,%03d' % (hrs, mins, secs, ms)
+
           srt_lines = []
           idx = 1
           for seg in segments:
               if seg['start'] >= start and seg['end'] <= end:
                   s = seg['start'] - start
                   e = seg['end'] - start
-                  srt_lines.append(f'{idx}\\n{format_time(s)} --> {format_time(e)}\\n{seg[\"text\"]}\\n')
+                  srt_lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + seg['text'] + '\n')
                   idx += 1
           with open('subs.srt', 'w', encoding='utf-8') as f:
-              f.write('\\n'.join(srt_lines))
+              f.write('\n'.join(srt_lines))
           print('SRT ready')
-          "
+          PYEOF
+          python3 tts_gen.py
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VOICE_NAME: ${{ github.event.inputs.voice_name }}
 
       - name: Cut, Mix Audio, and Burn Captions
         run: |
