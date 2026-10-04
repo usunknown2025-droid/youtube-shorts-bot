@@ -78,14 +78,14 @@ jobs:
       - name: Find Viral Moment with Gemini
         run: |
           python3 -c "
-          import json, os, requests, re
+          import json, os, requests, re, time
           with open('transcript.txt', encoding='utf-8') as f:
               transcript = f.read()
           api_key = os.environ['GEMINI_API_KEY']
-          prompt = f'''You are a viral Shorts editor. Below is a timestamped transcript of a YouTube video. 
+          prompt = f'''You are a viral Shorts editor. Below is a timestamped transcript of a YouTube video.
           
-          Your task: Find the SINGLE most interesting, emotional, funny, shocking, or viral-worthy 45-second segment. 
-          Focus on moments where the speaker says something surprising, emotional, controversial, or highly engaging. 
+          Your task: Find the SINGLE most interesting, emotional, funny, shocking, or viral-worthy 45-second segment.
+          Focus on moments where the speaker says something surprising, emotional, controversial, or highly engaging.
           Do NOT just pick the first 45 seconds. Look for the PEAK moment.
           
           Reply ONLY in JSON format, nothing else: {{\"start\": <start_seconds>, \"end\": <end_seconds>, \"reason\": \"<why this is viral>\"}}
@@ -93,31 +93,40 @@ jobs:
           Transcript:
           {transcript}'''
           
-          url = f'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={api_key}'
-          payload = {'contents': [{'parts': [{'text': prompt}]}]}
+          models = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest']
+          success = False
           
-          try:
-              r = requests.post(url, json=payload)
-              print('Status Code:', r.status_code)
-              result = r.json()
-              print('Response:', result)
+          for model_name in models:
+              for attempt in range(3):
+                  try:
+                      url = f'https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}'
+                      payload = {'contents': [{'parts': [{'text': prompt}]}]}
+                      r = requests.post(url, json=payload, timeout=60)
+                      print(f'Model: {model_name}, Attempt: {attempt+1}, Status: {r.status_code}')
+                      result = r.json()
+                      
+                      if 'candidates' in result:
+                          text = result['candidates'][0]['content']['parts'][0]['text']
+                          match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+                          if match:
+                              moment = json.loads(match.group())
+                              with open('moment.json', 'w') as f:
+                                  json.dump(moment, f)
+                              print(f'Viral moment: {moment}')
+                              success = True
+                              break
+                      else:
+                          print(f'Response: {result}')
+                          time.sleep(5)
+                  except Exception as e:
+                      print(f'Error: {e}')
+                      time.sleep(5)
               
-              if 'candidates' in result:
-                  text = result['candidates'][0]['content']['parts'][0]['text']
-                  match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
-                  if match:
-                      moment = json.loads(match.group())
-                      with open('moment.json', 'w') as f:
-                          json.dump(moment, f)
-                      print(f'Viral moment: {moment}')
-                  else:
-                      raise ValueError('No JSON found in response')
-              else:
-                  raise KeyError('candidates not found')
-                  
-          except Exception as e:
-              print(f'Error: {e}')
-              print('Fallback used')
+              if success:
+                  break
+          
+          if not success:
+              print('All models failed - Fallback used')
               with open('moment.json', 'w') as f:
                   json.dump({'start': 0, 'end': 45, 'reason': 'fallback'}, f)
           "
