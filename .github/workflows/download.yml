@@ -103,28 +103,26 @@ jobs:
 
       - name: Find Multiple Viral Moments with Groq
         run: |
-          python3 -c "
+          cat > find_moments.py << 'PYEOF'
           import json, os, requests, re, time
+
           with open('transcript.txt', encoding='utf-8') as f:
               transcript = f.read()
+
           api_key = os.environ['GROQ_API_KEY']
-          duration = int('${{ github.event.inputs.duration }}')
-          num_shorts = int('${{ github.event.inputs.num_shorts }}')
-          prompt = f'''You are a viral Shorts editor. Below is a timestamped English transcript of a YouTube video.
+          duration = int(os.environ.get('DURATION', '45'))
+          num_shorts = int(os.environ.get('NUM_SHORTS', '3'))
 
-Your task: Find the {num_shorts} BEST viral-worthy segments, each about {duration} seconds long.
-Each segment must be UNIQUE and NON-OVERLAPPING with other segments.
-Focus on moments where the speaker says something surprising, emotional, controversial, funny, or highly engaging.
-
-CRITICAL RULES:
-- Output MUST be in English only (Latin alphabet)
-- Do NOT use Hindi, Devanagari script, or any other language
-- The "reason" field MUST be in English
-
-Reply ONLY in JSON format, nothing else: {{\"moments\": [{{\"start\": <start_seconds>, \"end\": <end_seconds>, \"reason\": \"<why viral in English>\"}}, ...]}}
-
-Transcript:
-{transcript}'''
+          prompt = 'You are a viral Shorts editor. Below is a timestamped English transcript of a YouTube video.\n\n'
+          prompt += 'Your task: Find the ' + str(num_shorts) + ' BEST viral-worthy segments, each about ' + str(duration) + ' seconds long.\n'
+          prompt += 'Each segment must be UNIQUE and NON-OVERLAPPING with other segments.\n'
+          prompt += 'Focus on moments where the speaker says something surprising, emotional, controversial, funny, or highly engaging.\n\n'
+          prompt += 'CRITICAL RULES:\n'
+          prompt += '- Output MUST be in English only (Latin alphabet)\n'
+          prompt += '- Do NOT use Hindi, Devanagari script, or any other language\n'
+          prompt += '- The reason field MUST be in English\n\n'
+          prompt += 'Reply ONLY in JSON format, nothing else: {"moments": [{"start": <start_seconds>, "end": <end_seconds>, "reason": "<why viral in English>"}, ...]}\n\n'
+          prompt += 'Transcript:\n' + transcript
 
           url = 'https://api.groq.com/openai/v1/chat/completions'
           headers = {'Authorization': 'Bearer ' + api_key, 'Content-Type': 'application/json'}
@@ -143,7 +141,7 @@ Transcript:
                   result = r.json()
                   if 'choices' in result:
                       text = result['choices'][0]['message']['content']
-                      match = re.search(r'\{[\s\S]*\"moments\"[\s\S]*\}', text)
+                      match = re.search(r'\{[\s\S]*"moments"[\s\S]*\}', text)
                       if match:
                           data = json.loads(match.group())
                           moments = data.get('moments', [])
@@ -163,9 +161,12 @@ Transcript:
               print('Groq failed - Fallback used')
               with open('moments.json', 'w') as f:
                   json.dump([{'start': 0, 'end': duration, 'reason': 'fallback'}], f)
-          "
+          PYEOF
+          python3 find_moments.py
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          DURATION: ${{ github.event.inputs.duration }}
+          NUM_SHORTS: ${{ github.event.inputs.num_shorts }}
 
       - name: Generate Multiple Shorts
         run: |
@@ -192,7 +193,6 @@ Transcript:
               return '%02d:%02d:%02d,%03d' % (hrs, mins, secs, ms)
 
           def contains_non_english(text):
-              # Check if text has Devanagari or other non-Latin scripts
               for ch in text:
                   if ord(ch) > 0x0FFF:
                       return True
