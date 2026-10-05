@@ -110,16 +110,21 @@ jobs:
           api_key = os.environ['GROQ_API_KEY']
           duration = int('${{ github.event.inputs.duration }}')
           num_shorts = int('${{ github.event.inputs.num_shorts }}')
-          prompt = f'''You are a viral Shorts editor. Below is a timestamped transcript of a YouTube video.
+          prompt = f'''You are a viral Shorts editor. Below is a timestamped English transcript of a YouTube video.
 
-          Your task: Find the {num_shorts} BEST viral-worthy segments, each about {duration} seconds long.
-          Each segment must be UNIQUE and NON-OVERLAPPING with other segments.
-          Focus on moments where the speaker says something surprising, emotional, controversial, funny, or highly engaging.
+Your task: Find the {num_shorts} BEST viral-worthy segments, each about {duration} seconds long.
+Each segment must be UNIQUE and NON-OVERLAPPING with other segments.
+Focus on moments where the speaker says something surprising, emotional, controversial, funny, or highly engaging.
 
-          Reply ONLY in JSON format, nothing else: {{\"moments\": [{{\"start\": <start_seconds>, \"end\": <end_seconds>, \"reason\": \"<why viral>\"}}, ...]}}
+CRITICAL RULES:
+- Output MUST be in English only (Latin alphabet)
+- Do NOT use Hindi, Devanagari script, or any other language
+- The "reason" field MUST be in English
 
-          Transcript:
-          {transcript}'''
+Reply ONLY in JSON format, nothing else: {{\"moments\": [{{\"start\": <start_seconds>, \"end\": <end_seconds>, \"reason\": \"<why viral in English>\"}}, ...]}}
+
+Transcript:
+{transcript}'''
 
           url = 'https://api.groq.com/openai/v1/chat/completions'
           headers = {'Authorization': 'Bearer ' + api_key, 'Content-Type': 'application/json'}
@@ -186,8 +191,27 @@ jobs:
               ms = int((seconds - int(seconds)) * 1000)
               return '%02d:%02d:%02d,%03d' % (hrs, mins, secs, ms)
 
+          def contains_non_english(text):
+              # Check if text has Devanagari or other non-Latin scripts
+              for ch in text:
+                  if ord(ch) > 0x0FFF:
+                      return True
+              return False
+
           def gen_commentary(moment_text):
-              prompt = 'Here is a transcript of a video segment. Write a short, engaging English commentary/script (max 40 words) that can be used as a voiceover for this Short. Make it exciting and hook the viewer. Only reply with the English text, nothing else.\n\nTranscript: ' + moment_text
+              prompt = '''You are an ENGLISH voiceover writer for YouTube Shorts.
+
+Write a short, engaging ENGLISH commentary/script (maximum 40 words) for the video segment below.
+The original video may be in Hindi or any other language, but YOUR OUTPUT MUST BE PURE ENGLISH using only the Latin alphabet.
+
+STRICT RULES:
+1. ONLY English text - absolutely no Hindi, Devanagari, or any other script
+2. Do NOT write explanations, quotes, markdown, or labels
+3. Just the plain English commentary as a single paragraph
+4. Maximum 40 words
+5. Make it exciting, hook the viewer in the first 3 words
+
+Segment transcript (already in English): ''' + moment_text
               url = 'https://api.groq.com/openai/v1/chat/completions'
               headers = {'Authorization': 'Bearer ' + api_key, 'Content-Type': 'application/json'}
               payload = {
@@ -201,7 +225,11 @@ jobs:
                       r = requests.post(url, headers=headers, json=payload, timeout=60)
                       result = r.json()
                       if 'choices' in result:
-                          return result['choices'][0]['message']['content'].strip()
+                          text = result['choices'][0]['message']['content'].strip()
+                          if contains_non_english(text):
+                              print('WARNING: Non-English detected, retrying...')
+                              continue
+                          return text
                   except Exception as e:
                       print('Groq error: ' + str(e))
                       time.sleep(3)
