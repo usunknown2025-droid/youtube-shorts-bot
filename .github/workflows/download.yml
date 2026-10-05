@@ -80,20 +80,20 @@ jobs:
           segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
           lines = []
           seg_data = []
-          word_data = []
+          total_words = 0
           for s in segments:
               lines.append(f'{s.start:.1f}-{s.end:.1f}: {s.text}')
-              seg_data.append({'start': s.start, 'end': s.end, 'text': s.text})
+              seg_words = []
               if s.words:
                   for w in s.words:
-                      word_data.append({'start': w.start, 'end': w.end, 'word': w.word})
+                      seg_words.append({'start': w.start, 'end': w.end, 'word': w.word})
+                      total_words += 1
+              seg_data.append({'start': s.start, 'end': s.end, 'text': s.text, 'words': seg_words})
           with open('transcript.txt', 'w', encoding='utf-8') as f:
               f.write('\n'.join(lines))
           with open('segments.json', 'w', encoding='utf-8') as f:
               json.dump(seg_data, f)
-          with open('words.json', 'w', encoding='utf-8') as f:
-              json.dump(word_data, f)
-          print('Transcript ready with ' + str(len(word_data)) + ' words')
+          print('Transcript ready with ' + str(total_words) + ' words')
           "
 
       - name: Find Viral Moment with Gemini
@@ -215,11 +215,10 @@ jobs:
               print('TTS failed - creating silence')
               subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', 'tts.mp3'])
 
-          # Load word-level timestamps
-          with open('words.json', encoding='utf-8') as f:
-              words_data = json.load(f)
+          # Load segments with word timestamps
+          with open('segments.json', encoding='utf-8') as f:
+              all_segs = json.load(f)
 
-          # Build SRT with word-by-word captions
           def format_time(seconds):
               hrs = int(seconds // 3600)
               mins = int((seconds % 3600) // 60)
@@ -229,17 +228,30 @@ jobs:
 
           srt_lines = []
           idx = 1
-          for w in words_data:
-              if w['start'] >= start and w['end'] <= end:
-                  s = w['start'] - start
-                  e = w['end'] - start
-                  word_text = w['word'].strip()
-                  if word_text:
-                      srt_lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + word_text + '\n')
-                      idx += 1
+          for seg in all_segs:
+              # Skip segments that don't overlap with the clip
+              if seg['end'] < start or seg['start'] > end:
+                  continue
+              words = seg.get('words', [])
+              if not words:
+                  continue
+              growing = []
+              for i, w in enumerate(words):
+                  growing.append(w['word'].strip())
+                  s = max(w['start'] - start, 0)
+                  # End time = start of next word, or end of this word if last
+                  if i + 1 < len(words):
+                      e = words[i + 1]['start'] - start
+                  else:
+                      e = w['end'] - start
+                  if e <= s:
+                      e = s + 0.3  # Minimum display time
+                  text = ' '.join(growing)
+                  srt_lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + text + '\n')
+                  idx += 1
           with open('subs.srt', 'w', encoding='utf-8') as f:
               f.write('\n'.join(srt_lines))
-          print('SRT ready with ' + str(idx-1) + ' word captions')
+          print('SRT ready with ' + str(idx-1) + ' growing captions')
           PYEOF
           python3 tts_gen.py
         env:
