@@ -71,23 +71,29 @@ jobs:
       - name: Extract Audio
         run: ffmpeg -i video.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 audio.wav
 
-      - name: Transcribe with Whisper (English)
+      - name: Transcribe with Whisper (English, word timestamps)
         run: |
           python3 -c "
           import json
           from faster_whisper import WhisperModel
           model = WhisperModel('tiny', device='cpu', compute_type='int8')
-          segments, _ = model.transcribe('audio.wav', task='translate')
+          segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
           lines = []
           seg_data = []
+          word_data = []
           for s in segments:
               lines.append(f'{s.start:.1f}-{s.end:.1f}: {s.text}')
               seg_data.append({'start': s.start, 'end': s.end, 'text': s.text})
+              if s.words:
+                  for w in s.words:
+                      word_data.append({'start': w.start, 'end': w.end, 'word': w.word})
           with open('transcript.txt', 'w', encoding='utf-8') as f:
               f.write('\n'.join(lines))
           with open('segments.json', 'w', encoding='utf-8') as f:
               json.dump(seg_data, f)
-          print('Transcript ready')
+          with open('words.json', 'w', encoding='utf-8') as f:
+              json.dump(word_data, f)
+          print('Transcript ready with ' + str(len(word_data)) + ' words')
           "
 
       - name: Find Viral Moment with Gemini
@@ -209,7 +215,11 @@ jobs:
               print('TTS failed - creating silence')
               subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', 'tts.mp3'])
 
-          # Build SRT from ORIGINAL video speech (Whisper segments)
+          # Load word-level timestamps
+          with open('words.json', encoding='utf-8') as f:
+              words_data = json.load(f)
+
+          # Build SRT with word-by-word captions
           def format_time(seconds):
               hrs = int(seconds // 3600)
               mins = int((seconds % 3600) // 60)
@@ -219,15 +229,17 @@ jobs:
 
           srt_lines = []
           idx = 1
-          for seg in segments:
-              if seg['start'] >= start and seg['end'] <= end:
-                  s = seg['start'] - start
-                  e = seg['end'] - start
-                  srt_lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + seg['text'] + '\n')
-                  idx += 1
+          for w in words_data:
+              if w['start'] >= start and w['end'] <= end:
+                  s = w['start'] - start
+                  e = w['end'] - start
+                  word_text = w['word'].strip()
+                  if word_text:
+                      srt_lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + word_text + '\n')
+                      idx += 1
           with open('subs.srt', 'w', encoding='utf-8') as f:
               f.write('\n'.join(srt_lines))
-          print('SRT ready with ' + str(idx-1) + ' captions from original speech')
+          print('SRT ready with ' + str(idx-1) + ' word captions')
           PYEOF
           python3 tts_gen.py
         env:
