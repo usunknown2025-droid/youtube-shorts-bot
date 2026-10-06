@@ -8,9 +8,8 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 DURATION = int(os.environ.get('DURATION', '45'))
 NUM_SHORTS = int(os.environ.get('NUM_SHORTS', '3'))
 
-YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '').strip()
-YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '').strip()
-YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN', '').strip()
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
 
 def format_time(seconds):
@@ -45,99 +44,37 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
             result = r.json()
             if 'choices' in result:
                 return result['choices'][0]['message']['content']
-            else:
-                print('Groq response: ' + str(result)[:200])
-                time.sleep(5)
         except Exception as e:
             print('Groq error: ' + str(e))
             time.sleep(5)
     return None
 
 
-# ---------- YouTube Upload Functions ----------
-def get_youtube_access_token():
-    url = 'https://oauth2.googleapis.com/token'
+def save_to_supabase(chat_id, file_id, title, description, tags):
+    url = SUPABASE_URL + '/rest/v1/pending_shorts'
+    headers = {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+    }
     data = {
-        'client_id': YT_CLIENT_ID,
-        'client_secret': YT_CLIENT_SECRET,
-        'refresh_token': YT_REFRESH_TOKEN,
-        'grant_type': 'refresh_token'
+        'chat_id': chat_id,
+        'file_id': file_id,
+        'title': title,
+        'description': description,
+        'tags': tags,
+        'status': 'pending'
     }
-    print('YT_CLIENT_ID starts: ' + YT_CLIENT_ID[:20] if YT_CLIENT_ID else 'YT_CLIENT_ID empty')
-    print('YT_CLIENT_SECRET starts: ' + YT_CLIENT_SECRET[:10] if YT_CLIENT_SECRET else 'YT_CLIENT_SECRET empty')
     try:
-        r = requests.post(url, data=data, timeout=30)
+        r = requests.post(url, headers=headers, json=data, timeout=30)
         result = r.json()
-        if 'access_token' in result:
-            print('YouTube: Access token obtained')
-            return result['access_token']
+        if isinstance(result, list) and len(result) > 0:
+            return result[0].get('id')
         else:
-            print('Token error: ' + str(result))
+            print('Supabase save error: ' + str(result)[:300])
     except Exception as e:
-        print('Token exception: ' + str(e))
-    return None
-
-
-def generate_yt_metadata(commentary):
-    prompt = 'You are a YouTube Shorts SEO expert. Generate metadata for this Short.\n\n'
-    prompt += 'Context: ' + commentary[:500] + '\n\n'
-    prompt += 'Return JSON with keys:\n'
-    prompt += '- "title": catchy Shorts title (max 90 chars, English, 1-2 emojis)\n'
-    prompt += '- "description": 2-3 line English description with hashtags\n'
-    prompt += '- "tags": array of 10-15 English tags\n\n'
-    prompt += 'JSON only.'
-
-    result = groq_call(prompt, max_tokens=500, temp=0.7, json_mode=True)
-    if result:
-        try:
-            return json.loads(result)
-        except Exception as e:
-            print('Metadata parse error: ' + str(e))
-
-    return {
-        'title': 'Viral Moment You Must See! 🔥',
-        'description': 'Watch this amazing viral moment! Subscribe for more.\n\n#Shorts #Viral #Trending',
-        'tags': ['shorts', 'viral', 'trending', 'amazing', 'usa']
-    }
-
-
-def upload_to_youtube(video_path, title, description, tags):
-    access_token = get_youtube_access_token()
-    if not access_token:
-        print('YouTube: No access token')
-        return None
-
-    url = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status'
-    headers = {'Authorization': 'Bearer ' + access_token}
-
-    metadata = {
-        'snippet': {
-            'title': title[:100],
-            'description': description[:5000],
-            'tags': tags[:15],
-            'categoryId': '24'
-        },
-        'status': {
-            'privacyStatus': 'public',
-            'selfDeclaredMadeForKids': False
-        }
-    }
-
-    try:
-        with open(video_path, 'rb') as f:
-            files = {
-                'metadata': ('metadata.json', json.dumps(metadata), 'application/json'),
-                'video': (os.path.basename(video_path), f, 'video/mp4')
-            }
-            r = requests.post(url, headers=headers, files=files, timeout=300)
-        result = r.json()
-        if 'id' in result:
-            print('YouTube upload success: https://youtu.be/' + result['id'])
-            return result['id']
-        else:
-            print('YouTube upload error: ' + str(result)[:500])
-    except Exception as e:
-        print('YouTube exception: ' + str(e))
+        print('Supabase exception: ' + str(e))
     return None
 
 
@@ -157,14 +94,11 @@ for s in segments:
             total_words += 1
     seg_data.append({'start': s.start, 'end': s.end, 'text': s.text.strip(), 'words': seg_words})
 
-full_transcript = '\n'.join(transcript_lines)
 print('Transcript ready with ' + str(total_words) + ' words')
 
 
-# ---------- STEP 2: Find viral moments (CHUNKED) ----------
+# ---------- STEP 2: Find viral moments (chunked) ----------
 print('\n=== STEP 2: Find Viral Moments (chunked) ===')
-
-# Split transcript into chunks of ~3000 chars
 lines = transcript_lines
 chunk_size = 3000
 chunks = []
@@ -180,7 +114,6 @@ if current:
     chunks.append(current)
 
 print('Split transcript into ' + str(len(chunks)) + ' chunks')
-
 all_moments = []
 per_chunk = max(1, (NUM_SHORTS + len(chunks) - 1) // len(chunks))
 
@@ -189,7 +122,6 @@ for i, chunk in enumerate(chunks):
     prompt += 'Each moment should be about ' + str(DURATION) + ' seconds long.\n\n'
     prompt += 'Return JSON: {"moments": [{"start": <sec>, "end": <sec>, "reason": "<why>"}]}\n\n'
     prompt += 'Transcript chunk:\n' + chunk
-
     result = groq_call(prompt, max_tokens=1500, temp=0.3, json_mode=True)
     if result:
         try:
@@ -199,9 +131,8 @@ for i, chunk in enumerate(chunks):
             all_moments.extend(ms)
         except Exception as e:
             print('Chunk ' + str(i+1) + ' parse error: ' + str(e))
-    time.sleep(10)
+    time.sleep(5)
 
-# Remove overlapping moments and keep only NUM_SHORTS
 all_moments.sort(key=lambda x: x.get('start', 0))
 filtered = []
 for m in all_moments:
@@ -237,6 +168,27 @@ def gen_commentary(moment_text):
             if not contains_non_english(t):
                 return t
     return 'Check out this amazing moment!'
+
+
+def gen_yt_metadata(commentary):
+    prompt = 'You are a YouTube Shorts SEO expert. Generate metadata for this Short.\n\n'
+    prompt += 'Context: ' + commentary[:500] + '\n\n'
+    prompt += 'Return JSON with keys:\n'
+    prompt += '- "title": catchy Shorts title (max 90 chars, English, 1-2 emojis)\n'
+    prompt += '- "description": 2-3 line English description with hashtags\n'
+    prompt += '- "tags": array of 10-15 English tags\n\n'
+    prompt += 'JSON only.'
+    result = groq_call(prompt, max_tokens=500, temp=0.7, json_mode=True)
+    if result:
+        try:
+            return json.loads(result)
+        except Exception as e:
+            print('Metadata parse error: ' + str(e))
+    return {
+        'title': 'Viral Moment You Must See! 🔥',
+        'description': 'Watch this amazing viral moment! Subscribe for more.\n\n#Shorts #Viral #Trending',
+        'tags': ['shorts', 'viral', 'trending', 'amazing', 'usa']
+    }
 
 
 # ---------- STEP 4: TTS ----------
@@ -309,8 +261,6 @@ for idx, moment in enumerate(moments):
         continue
 
     moment_text = ' '.join([s['text'] for s in moment_segs])
-
-    print('Generating commentary...')
     commentary = gen_commentary(moment_text)
     commentary = re.sub(r'["\'\n\r]', ' ', commentary).strip()[:300]
     print('Commentary: ' + commentary)
@@ -327,7 +277,6 @@ for idx, moment in enumerate(moments):
     out_path = 'shorts_%d.mp4' % idx
     vf = "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,subtitles=" + srt_path + ":force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=50'[v];[0:a]volume=0.2[bg];[1:a]volume=1.0[ai];[bg][ai]amix=inputs=2:duration=first[aout]"
 
-    print('Rendering Short...')
     subprocess.run([
         'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
         '-i', 'video.mp4', '-i', tts_path,
@@ -338,42 +287,65 @@ for idx, moment in enumerate(moments):
         out_path
     ])
 
+    # Send video to Telegram and get file_id
     print('Sending to Telegram...')
-    subprocess.run([
+    tg_response = subprocess.run([
         'curl', '-s', '-X', 'POST',
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
         '-F', 'chat_id=' + CHAT_ID,
         '-F', 'video=@' + out_path,
         '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
-    ])
-    time.sleep(2)
+    ], capture_output=True, text=True)
 
+    file_id = None
+    try:
+        tg_json = json.loads(tg_response.stdout)
+        if tg_json.get('ok'):
+            file_id = tg_json['result']['video']['file_id']
+            print('File ID: ' + file_id)
+    except Exception as e:
+        print('Telegram parse error: ' + str(e))
+
+    if not file_id:
+        print('Failed to get file_id, skipping Supabase save')
+        continue
+
+    # Generate metadata
     print('Generating YouTube metadata...')
-    meta = generate_yt_metadata(commentary)
-    print('Title: ' + meta.get('title', ''))
+    meta = gen_yt_metadata(commentary)
+    title = meta.get('title', 'Viral Short')
+    description = meta.get('description', '')
+    tags = ', '.join(meta.get('tags', []))
 
-    print('Uploading to YouTube...')
-    yt_id = upload_to_youtube(
-        out_path,
-        meta.get('title', 'Viral Short'),
-        meta.get('description', ''),
-        meta.get('tags', [])
-    )
+    # Save to Supabase
+    print('Saving to Supabase...')
+    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags)
+    print('Supabase row ID: ' + str(row_id))
 
-    if yt_id:
+    if row_id:
+        # Send approval message with buttons
+        approval_text = '📝 Title: ' + title + '\n\n'
+        approval_text += '📄 Description: ' + description[:200] + '...\n\n'
+        approval_text += '🏷️ Tags: ' + tags[:200] + '\n\n'
+        approval_text += 'Kya karna hai?'
+
+        keyboard = json.dumps({
+            'inline_keyboard': [[
+                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
+                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
+                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
+            ]]
+        })
+
         subprocess.run([
             'curl', '-s', '-X', 'POST',
             'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
             '-d', 'chat_id=' + CHAT_ID,
-            '-d', 'text=YouTube: https://youtu.be/' + yt_id
+            '-d', 'text=' + approval_text,
+            '-d', 'reply_markup=' + keyboard
         ])
-    else:
-        subprocess.run([
-            'curl', '-s', '-X', 'POST',
-            'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
-            '-d', 'chat_id=' + CHAT_ID,
-            '-d', 'text=YouTube upload failed for Short ' + str(idx + 1)
-        ])
+
+    time.sleep(3)
 
     try:
         os.remove(tts_path)
@@ -381,4 +353,4 @@ for idx, moment in enumerate(moments):
     except:
         pass
 
-print('\nAll done!')
+print('\nAll shorts generated and sent for approval!')
