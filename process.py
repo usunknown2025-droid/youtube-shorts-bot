@@ -70,25 +70,52 @@ transcript = '\n'.join(transcript_lines)
 print('Transcript ready with ' + str(total_words) + ' words')
 
 
-# ---------- STEP 2: Find viral moments ----------
-print('\n=== STEP 2: Find Viral Moments (Groq) ===')
+# ---------- STEP 2: Find viral moments (JSON MODE) ----------
+print('\n=== STEP 2: Find Viral Moments (Groq JSON mode) ===')
 prompt = 'You are a viral Shorts editor. Below is a timestamped English transcript of a YouTube video.\n\n'
 prompt += 'Your task: Find the ' + str(NUM_SHORTS) + ' BEST viral-worthy segments, each about ' + str(DURATION) + ' seconds long.\n'
 prompt += 'Each segment must be UNIQUE and NON-OVERLAPPING.\n'
 prompt += 'Focus on moments where the speaker says something surprising, emotional, controversial, funny, or highly engaging.\n\n'
-prompt += 'Reply ONLY in JSON format: {"moments": [{"start": <start_seconds>, "end": <end_seconds>, "reason": "<why viral>"}, ...]}\n\n'
+prompt += 'You MUST return a JSON object with key "moments" containing an array of objects.\n'
+prompt += 'Each object must have keys: "start" (number), "end" (number), "reason" (string).\n'
+prompt += 'Return exactly ' + str(NUM_SHORTS) + ' moments.\n'
+prompt += 'Example: {"moments": [{"start": 12.5, "end": 57.5, "reason": "shocking reveal"}, {"start": 120.0, "end": 165.0, "reason": "funny moment"}]}\n\n'
 prompt += 'Transcript:\n' + transcript
 
-text = groq_call(prompt, max_tokens=2000, temp=0.3)
+url = 'https://api.groq.com/openai/v1/chat/completions'
+headers = {'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json'}
+payload = {
+    'model': 'openai/gpt-oss-120b',
+    'messages': [{'role': 'user', 'content': prompt}],
+    'temperature': 0.3,
+    'max_tokens': 4000,
+    'response_format': {'type': 'json_object'}
+}
+
+text = None
+for attempt in range(3):
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=90)
+        print('Groq attempt ' + str(attempt + 1) + ', Status: ' + str(r.status_code))
+        result = r.json()
+        if 'choices' in result:
+            text = result['choices'][0]['message']['content']
+            break
+        else:
+            print('Response: ' + str(result)[:300])
+            time.sleep(5)
+    except Exception as e:
+        print('Groq error: ' + str(e))
+        time.sleep(5)
+
 moments = []
 if text:
-    match = re.search(r'\{[\s\S]*"moments"[\s\S]*\}', text)
-    if match:
-        try:
-            data = json.loads(match.group())
-            moments = data.get('moments', [])
-        except Exception as e:
-            print('JSON parse error: ' + str(e))
+    try:
+        data = json.loads(text)
+        moments = data.get('moments', [])
+    except Exception as e:
+        print('JSON parse error: ' + str(e))
+        print('Raw text: ' + text[:500])
 
 if not moments:
     print('Fallback used')
@@ -164,7 +191,6 @@ for idx, moment in enumerate(moments):
     end = float(moment['end'])
     duration = end - start
 
-    # Get segments inside this moment
     moment_segs = []
     for seg in seg_data:
         if seg['end'] < start or seg['start'] > end:
@@ -190,7 +216,6 @@ for idx, moment in enumerate(moments):
         print('No segments in moment, skipping')
         continue
 
-    # Generate AI commentary
     print('Generating commentary...')
     moment_text = ' '.join([s['text'] for s in moment_segs])
     commentary = gen_commentary(moment_text)
@@ -199,7 +224,6 @@ for idx, moment in enumerate(moments):
         commentary = 'Check out this amazing moment!'
     print('Commentary: ' + commentary)
 
-    # TTS for commentary
     tts_path = 'tts_%d.mp3' % idx
     print('Generating TTS...')
     if not gen_tts(commentary, tts_path):
@@ -207,14 +231,12 @@ for idx, moment in enumerate(moments):
         subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
                         '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', tts_path])
 
-    # Build SRT with English captions (from original speech)
     print('Building SRT...')
     srt_path = 'subs_%d.srt' % idx
     srt_content = build_srt(0, duration, moment_segs)
     with open(srt_path, 'w', encoding='utf-8') as f:
         f.write(srt_content)
 
-    # Render: original video + original audio 20% + AI commentary 100% + captions
     print('Rendering Short...')
     out_path = 'shorts_%d.mp4' % idx
     vf = "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,subtitles=" + srt_path + ":force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=50'[v];[0:a]volume=0.2[bg];[1:a]volume=1.0[ai];[bg][ai]amix=inputs=2:duration=first[aout]"
@@ -229,7 +251,6 @@ for idx, moment in enumerate(moments):
         out_path
     ])
 
-    # Send to Telegram
     print('Sending Short ' + str(idx + 1) + ' to Telegram...')
     subprocess.run([
         'curl', '-s', '-X', 'POST',
