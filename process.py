@@ -8,9 +8,9 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 DURATION = int(os.environ.get('DURATION', '45'))
 NUM_SHORTS = int(os.environ.get('NUM_SHORTS', '3'))
 
-YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '')
-YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '')
-YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN', '')
+YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '').strip()
+YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '').strip()
+YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN', '').strip()
 
 
 def format_time(seconds):
@@ -32,7 +32,7 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
     url = 'https://api.groq.com/openai/v1/chat/completions'
     headers = {'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json'}
     payload = {
-        'model': 'openai/gpt-oss-120b',
+        'model': 'openai/gpt-oss-20b',
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': temp,
         'max_tokens': max_tokens
@@ -45,6 +45,9 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
             result = r.json()
             if 'choices' in result:
                 return result['choices'][0]['message']['content']
+            else:
+                print('Groq response: ' + str(result)[:200])
+                time.sleep(5)
         except Exception as e:
             print('Groq error: ' + str(e))
             time.sleep(5)
@@ -60,10 +63,13 @@ def get_youtube_access_token():
         'refresh_token': YT_REFRESH_TOKEN,
         'grant_type': 'refresh_token'
     }
+    print('YT_CLIENT_ID starts: ' + YT_CLIENT_ID[:20] if YT_CLIENT_ID else 'YT_CLIENT_ID empty')
+    print('YT_CLIENT_SECRET starts: ' + YT_CLIENT_SECRET[:10] if YT_CLIENT_SECRET else 'YT_CLIENT_SECRET empty')
     try:
         r = requests.post(url, data=data, timeout=30)
         result = r.json()
         if 'access_token' in result:
+            print('YouTube: Access token obtained')
             return result['access_token']
         else:
             print('Token error: ' + str(result))
@@ -72,20 +78,19 @@ def get_youtube_access_token():
     return None
 
 
-def generate_yt_metadata(commentary, moment_text):
-    prompt = 'You are a YouTube Shorts SEO expert. Generate metadata for a viral Short.\n\n'
-    prompt += 'Context: ' + commentary + '\n\n'
-    prompt += 'Return a JSON object with these keys:\n'
-    prompt += '- "title": catchy YouTube Shorts title (max 90 chars, English, with 1-2 emojis)\n'
-    prompt += '- "description": 2-3 line engaging description in English with hashtags\n'
-    prompt += '- "tags": array of 10-15 English tags (no # symbol)\n\n'
-    prompt += 'JSON only, no other text.'
+def generate_yt_metadata(commentary):
+    prompt = 'You are a YouTube Shorts SEO expert. Generate metadata for this Short.\n\n'
+    prompt += 'Context: ' + commentary[:500] + '\n\n'
+    prompt += 'Return JSON with keys:\n'
+    prompt += '- "title": catchy Shorts title (max 90 chars, English, 1-2 emojis)\n'
+    prompt += '- "description": 2-3 line English description with hashtags\n'
+    prompt += '- "tags": array of 10-15 English tags\n\n'
+    prompt += 'JSON only.'
 
     result = groq_call(prompt, max_tokens=500, temp=0.7, json_mode=True)
     if result:
         try:
-            data = json.loads(result)
-            return data
+            return json.loads(result)
         except Exception as e:
             print('Metadata parse error: ' + str(e))
 
@@ -99,7 +104,7 @@ def generate_yt_metadata(commentary, moment_text):
 def upload_to_youtube(video_path, title, description, tags):
     access_token = get_youtube_access_token()
     if not access_token:
-        print('YouTube: Failed to get access token')
+        print('YouTube: No access token')
         return None
 
     url = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status'
@@ -152,68 +157,81 @@ for s in segments:
             total_words += 1
     seg_data.append({'start': s.start, 'end': s.end, 'text': s.text.strip(), 'words': seg_words})
 
-transcript = '\n'.join(transcript_lines)
+full_transcript = '\n'.join(transcript_lines)
 print('Transcript ready with ' + str(total_words) + ' words')
 
 
-# ---------- STEP 2: Find viral moments (JSON mode) ----------
-print('\n=== STEP 2: Find Viral Moments ===')
-prompt = 'You are a viral Shorts editor. Below is a timestamped English transcript.\n\n'
-prompt += 'Find the ' + str(NUM_SHORTS) + ' BEST viral-worthy segments, each about ' + str(DURATION) + ' seconds.\n'
-prompt += 'Each segment must be UNIQUE and NON-OVERLAPPING.\n\n'
-prompt += 'Return a JSON object with key "moments" containing array of objects with keys: "start", "end", "reason".\n'
-prompt += 'Return exactly ' + str(NUM_SHORTS) + ' moments.\n\n'
-prompt += 'Transcript:\n' + transcript
+# ---------- STEP 2: Find viral moments (CHUNKED) ----------
+print('\n=== STEP 2: Find Viral Moments (chunked) ===')
 
-url = 'https://api.groq.com/openai/v1/chat/completions'
-headers = {'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json'}
-payload = {
-    'model': 'openai/gpt-oss-120b',
-    'messages': [{'role': 'user', 'content': prompt}],
-    'temperature': 0.3,
-    'max_tokens': 4000,
-    'response_format': {'type': 'json_object'}
-}
+# Split transcript into chunks of ~3000 chars
+lines = transcript_lines
+chunk_size = 3000
+chunks = []
+current = ''
+for line in lines:
+    if len(current) + len(line) > chunk_size:
+        if current:
+            chunks.append(current)
+        current = line + '\n'
+    else:
+        current += line + '\n'
+if current:
+    chunks.append(current)
 
-text = None
-for attempt in range(3):
-    try:
-        r = requests.post(url, headers=headers, json=payload, timeout=90)
-        print('Groq attempt ' + str(attempt + 1) + ', Status: ' + str(r.status_code))
-        result = r.json()
-        if 'choices' in result:
-            text = result['choices'][0]['message']['content']
+print('Split transcript into ' + str(len(chunks)) + ' chunks')
+
+all_moments = []
+per_chunk = max(1, (NUM_SHORTS + len(chunks) - 1) // len(chunks))
+
+for i, chunk in enumerate(chunks):
+    prompt = 'Find ' + str(per_chunk) + ' most viral/interesting moments in this transcript chunk.\n'
+    prompt += 'Each moment should be about ' + str(DURATION) + ' seconds long.\n\n'
+    prompt += 'Return JSON: {"moments": [{"start": <sec>, "end": <sec>, "reason": "<why>"}]}\n\n'
+    prompt += 'Transcript chunk:\n' + chunk
+
+    result = groq_call(prompt, max_tokens=1500, temp=0.3, json_mode=True)
+    if result:
+        try:
+            data = json.loads(result)
+            ms = data.get('moments', [])
+            print('Chunk ' + str(i+1) + ': got ' + str(len(ms)) + ' moments')
+            all_moments.extend(ms)
+        except Exception as e:
+            print('Chunk ' + str(i+1) + ' parse error: ' + str(e))
+    time.sleep(10)
+
+# Remove overlapping moments and keep only NUM_SHORTS
+all_moments.sort(key=lambda x: x.get('start', 0))
+filtered = []
+for m in all_moments:
+    overlap = False
+    for f in filtered:
+        if not (m['end'] <= f['start'] or m['start'] >= f['end']):
+            overlap = True
             break
-        else:
-            print('Response: ' + str(result)[:300])
-            time.sleep(5)
-    except Exception as e:
-        print('Groq error: ' + str(e))
-        time.sleep(5)
+    if not overlap:
+        filtered.append(m)
+    if len(filtered) >= NUM_SHORTS:
+        break
 
-moments = []
-if text:
-    try:
-        data = json.loads(text)
-        moments = data.get('moments', [])
-    except Exception as e:
-        print('JSON parse error: ' + str(e))
+moments = filtered[:NUM_SHORTS]
 
 if not moments:
     print('Fallback used')
     moments = [{'start': 0, 'end': DURATION, 'reason': 'fallback'}]
 
-print('Got ' + str(len(moments)) + ' moments')
+print('Final: Got ' + str(len(moments)) + ' moments')
 
 
 # ---------- STEP 3: Commentary ----------
 def gen_commentary(moment_text):
     prompt = 'Write a short, engaging ENGLISH commentary (max 40 words) for this video segment.\n'
-    prompt += 'OUTPUT MUST BE PURE ENGLISH. No Hindi, no Devanagari, no other scripts.\n'
-    prompt += 'Just the plain commentary, no labels, no quotes.\n\n'
-    prompt += 'Segment: ' + moment_text
+    prompt += 'PURE ENGLISH only. No Hindi, no other scripts.\n'
+    prompt += 'Just the commentary, no labels.\n\n'
+    prompt += 'Segment: ' + moment_text[:1000]
     for attempt in range(3):
-        result = groq_call(prompt, max_tokens=200, temp=0.7)
+        result = groq_call(prompt, max_tokens=150, temp=0.7)
         if result:
             t = result.strip()
             if not contains_non_english(t):
@@ -331,7 +349,7 @@ for idx, moment in enumerate(moments):
     time.sleep(2)
 
     print('Generating YouTube metadata...')
-    meta = generate_yt_metadata(commentary, moment_text)
+    meta = generate_yt_metadata(commentary)
     print('Title: ' + meta.get('title', ''))
 
     print('Uploading to YouTube...')
@@ -347,14 +365,14 @@ for idx, moment in enumerate(moments):
             'curl', '-s', '-X', 'POST',
             'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
             '-d', 'chat_id=' + CHAT_ID,
-            '-d', 'text=✅ YouTube uploaded: https://youtu.be/' + yt_id
+            '-d', 'text=YouTube: https://youtu.be/' + yt_id
         ])
     else:
         subprocess.run([
             'curl', '-s', '-X', 'POST',
             'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
             '-d', 'chat_id=' + CHAT_ID,
-            '-d', 'text=⚠️ YouTube upload failed for Short ' + str(idx + 1)
+            '-d', 'text=YouTube upload failed for Short ' + str(idx + 1)
         ])
 
     try:
@@ -363,4 +381,4 @@ for idx, moment in enumerate(moments):
     except:
         pass
 
-print('\nAll shorts generated, sent, and uploaded!')
+print('\nAll done!')
