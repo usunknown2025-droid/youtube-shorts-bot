@@ -1,9 +1,8 @@
-import json, os, requests, subprocess, time, re, sys
+import json, os, requests, subprocess, time, re
 from faster_whisper import WhisperModel
 from gtts import gTTS
 
 GROQ_KEY = os.environ['GROQ_API_KEY']
-VOICE = os.environ.get('VOICE_NAME', 'en-US-DavisNeural')
 CHAT_ID = os.environ.get('CHAT_ID', '')
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 DURATION = int(os.environ.get('DURATION', '45'))
@@ -16,13 +15,6 @@ def format_time(seconds):
     secs = int(seconds % 60)
     ms = int((seconds - int(seconds)) * 1000)
     return '%02d:%02d:%02d,%03d' % (hrs, mins, secs, ms)
-
-
-def contains_non_english(text):
-    for ch in text:
-        if ord(ch) > 0x0FFF:
-            return True
-    return False
 
 
 def groq_call(prompt, max_tokens=2000, temp=0.3):
@@ -50,8 +42,18 @@ def groq_call(prompt, max_tokens=2000, temp=0.3):
     return None
 
 
-# ---------- STEP 1: Transcribe ----------
-print('\n=== STEP 1: Whisper Transcription ===')
+def get_audio_duration(path):
+    probe = subprocess.run(['ffprobe', '-v', 'error', '-show_entries',
+                            'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
+                            path], capture_output=True, text=True)
+    try:
+        return float(probe.stdout.strip())
+    except:
+        return 0.0
+
+
+# ---------- STEP 1: Transcribe with word timestamps ----------
+print('\n=== STEP 1: Whisper Transcription (English translate) ===')
 model = WhisperModel('tiny', device='cpu', compute_type='int8')
 segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
 transcript_lines = []
@@ -64,26 +66,19 @@ for s in segments:
         for w in s.words:
             seg_words.append({'start': w.start, 'end': w.end, 'word': w.word})
             total_words += 1
-    seg_data.append({'start': s.start, 'end': s.end, 'text': s.text, 'words': seg_words})
+    seg_data.append({'start': s.start, 'end': s.end, 'text': s.text.strip(), 'words': seg_words})
 
-with open('transcript.txt', 'w', encoding='utf-8') as f:
-    f.write('\n'.join(transcript_lines))
-with open('segments.json', 'w', encoding='utf-8') as f:
-    json.dump(seg_data, f)
 transcript = '\n'.join(transcript_lines)
 print('Transcript ready with ' + str(total_words) + ' words')
 
 
-# ---------- STEP 2: Find Viral Moments ----------
+# ---------- STEP 2: Find viral moments ----------
 print('\n=== STEP 2: Find Viral Moments (Groq) ===')
 prompt = 'You are a viral Shorts editor. Below is a timestamped English transcript of a YouTube video.\n\n'
 prompt += 'Your task: Find the ' + str(NUM_SHORTS) + ' BEST viral-worthy segments, each about ' + str(DURATION) + ' seconds long.\n'
 prompt += 'Each segment must be UNIQUE and NON-OVERLAPPING.\n'
 prompt += 'Focus on moments where the speaker says something surprising, emotional, controversial, funny, or highly engaging.\n\n'
-prompt += 'CRITICAL RULES:\n'
-prompt += '- Output MUST be in English only (Latin alphabet)\n'
-prompt += '- The reason field MUST be in English\n\n'
-prompt += 'Reply ONLY in JSON format, nothing else: {"moments": [{"start": <start_seconds>, "end": <end_seconds>, "reason": "<why viral>"}, ...]}\n\n'
+prompt += 'Reply ONLY in JSON format: {"moments": [{"start": <start_seconds>, "end": <end_seconds>, "reason": "<why viral>"}, ...]}\n\n'
 prompt += 'Transcript:\n' + transcript
 
 text = groq_call(prompt, max_tokens=2000, temp=0.3)
@@ -101,54 +96,111 @@ if not moments:
     print('Fallback used')
     moments = [{'start': 0, 'end': DURATION, 'reason': 'fallback'}]
 
-with open('moments.json', 'w') as f:
-    json.dump(moments, f)
 print('Got ' + str(len(moments)) + ' moments')
 
 
-# ---------- STEP 3: Generate Commentary ----------
-def gen_commentary(moment_text):
-    prompt = 'You are an ENGLISH voiceover writer for YouTube Shorts.\n\n'
-    prompt += 'Write a short, engaging ENGLISH commentary (maximum 40 words) for the video segment below.\n'
-    prompt += 'The original video may be in Hindi or any other language, but YOUR OUTPUT MUST BE PURE ENGLISH.\n\n'
-    prompt += 'STRICT RULES:\n'
-    prompt += '1. ONLY English text - no Hindi, no Devanagari, no other scripts\n'
-    prompt += '2. Do NOT write explanations, quotes, markdown, or labels\n'
-    prompt += '3. Just the plain English commentary as a single paragraph\n'
-    prompt += '4. Maximum 40 words\n'
-    prompt += '5. Hook the viewer in the first 3 words\n\n'
-    prompt += 'Segment transcript: ' + moment_text
-    for attempt in range(3):
-        result = groq_call(prompt, max_tokens=200, temp=0.7)
-        if result:
-            text = result.strip()
-            if not contains_non_english(text):
-                return text
-            print('Non-English detected, retrying...')
-    return 'Check out this amazing moment!'
+# ---------- STEP 3: Build English dub track for a moment ----------
+def build_dub_track(moment_segments, moment_duration, output_path):
+    """For each segment, generate English TTS, align to segment timing, mix into one track."""
+    # Generate TTS for each segment with the correct speed
+    processed = []
+    for i, seg in enumerate(moment_segments):
+        seg_text = seg['text'].strip()
+        if not seg_text:
+            continue
+        seg_dur = seg['end'] - seg['start']
+        if seg_dur <= 0.1:
+            continue
 
-
-# ---------- STEP 4: TTS ----------
-def gen_tts(text, path):
-    for attempt in range(3):
+        tts_raw = 'tmp_tts_%d.mp3' % i
         try:
-            tts = gTTS(text=text, lang='en', slow=False)
-            tts.save(path)
-            if os.path.exists(path) and os.path.getsize(path) > 1000:
-                return True
+            tts = gTTS(text=seg_text, lang='en', slow=False)
+            tts.save(tts_raw)
         except Exception as e:
-            print('TTS error: ' + str(e))
-            time.sleep(3)
-    return False
+            print('TTS fail seg %d: %s' % (i, e))
+            continue
+
+        tts_dur = get_audio_duration(tts_raw)
+        if tts_dur <= 0:
+            continue
+
+        # Speed adjustment: tempo > 1 = faster
+        tempo = tts_dur / seg_dur
+        if tempo > 1.6:
+            tempo = 1.6
+        if tempo < 0.6:
+            tempo = 0.6
+
+        tts_adj = 'tmp_adj_%d.wav' % i
+        if abs(tempo - 1.0) > 0.03:
+            subprocess.run(['ffmpeg', '-y', '-i', tts_raw,
+                            '-filter:a', 'atempo=%0.3f' % tempo,
+                            '-ar', '44100', '-ac', '2', tts_adj],
+                           capture_output=True)
+        else:
+            subprocess.run(['ffmpeg', '-y', '-i', tts_raw,
+                            '-ar', '44100', '-ac', '2', tts_adj],
+                           capture_output=True)
+
+        # Now pad/trim to exactly seg_dur
+        tts_final = 'tmp_fin_%d.wav' % i
+        subprocess.run(['ffmpeg', '-y', '-i', tts_adj,
+                        '-af', 'apad', '-t', '%0.3f' % seg_dur,
+                        '-ar', '44100', '-ac', '2', tts_final],
+                       capture_output=True)
+
+        delay_ms = int(seg['start'] * 1000)
+        processed.append({'file': tts_final, 'delay': delay_ms})
+        try:
+            os.remove(tts_raw)
+            os.remove(tts_adj)
+        except:
+            pass
+
+    if not processed:
+        return False
+
+    # Build ffmpeg command with anullsrc base + each segment delayed
+    cmd = ['ffmpeg', '-y', '-f', 'lavfi', '-i',
+           'anullsrc=r=44100:cl=stereo', '-t', '%0.3f' % moment_duration]
+    for p in processed:
+        cmd += ['-i', p['file']]
+
+    filters = []
+    filters.append('[0:a]volume=0[base]')
+    mix_inputs = ['[base]']
+    for idx, p in enumerate(processed):
+        label = '[s%d]' % idx
+        filters.append('[%d:a]adelay=%d|%d,volume=1.0%s' % (idx + 1, p['delay'], p['delay'], label))
+        mix_inputs.append(label)
+    n = len(processed) + 1
+    filters.append('%samix=inputs=%d:duration=first:normalize=0[out]' % (''.join(mix_inputs), n))
+
+    filter_complex = ';'.join(filters)
+
+    cmd += ['-filter_complex', filter_complex,
+            '-map', '[out]', '-ar', '44100', '-ac', '2',
+            '-c:a', 'libmp3lame', '-b:a', '192k', output_path]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print('Dub track build failed: ' + result.stderr[-500:])
+        return False
+
+    for p in processed:
+        try:
+            os.remove(p['file'])
+        except:
+            pass
+
+    return True
 
 
-# ---------- STEP 5: Build SRT ----------
-def build_srt(start, end):
+# ---------- STEP 4: Build SRT from word timestamps ----------
+def build_srt(start, end, moment_segs):
     srt_lines = []
     idx = 1
-    for seg in seg_data:
-        if seg['end'] < start or seg['start'] > end:
-            continue
+    for seg in moment_segs:
         words = seg.get('words', [])
         if not words:
             continue
@@ -168,42 +220,64 @@ def build_srt(start, end):
     return '\n'.join(srt_lines)
 
 
-# ---------- STEP 6: Loop ----------
+# ---------- STEP 5: Process each moment ----------
 for idx, moment in enumerate(moments):
     print('\n========== SHORT ' + str(idx + 1) + '/' + str(len(moments)) + ' ==========')
     start = float(moment['start'])
     end = float(moment['end'])
     duration = end - start
 
-    moment_text = ' '.join([s['text'] for s in seg_data if s['start'] >= start and s['end'] <= end])
+    # Get segments that fall inside this moment
+    moment_segs = []
+    for seg in seg_data:
+        if seg['end'] < start or seg['start'] > end:
+            continue
+        # Clip segment boundaries to moment range
+        new_seg = {
+            'start': max(seg['start'], start) - start,
+            'end': min(seg['end'], end) - start,
+            'text': seg['text'],
+            'words': []
+        }
+        # Also clip words
+        for w in seg.get('words', []):
+            if w['end'] < start or w['start'] > end:
+                continue
+            new_seg['words'].append({
+                'start': max(w['start'], start) - start,
+                'end': min(w['end'], end) - start,
+                'word': w['word']
+            })
+        if new_seg['end'] > new_seg['start']:
+            moment_segs.append(new_seg)
 
-    print('Generating commentary...')
-    commentary = gen_commentary(moment_text)
-    commentary = re.sub(r'["\'\n\r]', ' ', commentary).strip()[:300]
-    if not commentary:
-        commentary = 'Check out this amazing moment!'
-    print('Commentary: ' + commentary)
+    if not moment_segs:
+        print('No segments in moment, skipping')
+        continue
 
-    tts_path = 'tts_' + str(idx) + '.mp3'
-    srt_path = 'subs_' + str(idx) + '.srt'
-    out_path = 'shorts_' + str(idx) + '.mp4'
-
-    print('Generating TTS...')
-    if not gen_tts(commentary, tts_path):
-        print('TTS failed - creating silence')
+    # Build English dub track
+    print('Building English dub track...')
+    dub_path = 'dub_%d.mp3' % idx
+    if not build_dub_track(moment_segs, duration, dub_path):
+        print('Dub track failed, using silence')
         subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-                        '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', tts_path])
+                        '-t', str(duration), '-q:a', '9', '-acodec', 'libmp3lame', dub_path])
 
+    # Build SRT
     print('Building SRT...')
-    srt_content = build_srt(start, end)
+    srt_path = 'subs_%d.srt' % idx
+    srt_content = build_srt(0, duration, moment_segs)  # already relative to moment
     with open(srt_path, 'w', encoding='utf-8') as f:
         f.write(srt_content)
 
+    # Render final Short: original video + dub track (original audio 15%)
     print('Rendering Short...')
-    vf = "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,subtitles=" + srt_path + ":force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=50'[v];[0:a]volume=0.2[bg];[1:a]volume=1.0[tts];[bg][tts]amix=inputs=2:duration=first[aout]"
+    out_path = 'shorts_%d.mp4' % idx
+    vf = "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,subtitles=" + srt_path + ":force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=50'[v];[0:a]volume=0.15[bg];[1:a]volume=1.0[dub];[bg][dub]amix=inputs=2:duration=first[aout]"
+
     subprocess.run([
         'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
-        '-i', 'video.mp4', '-i', tts_path,
+        '-i', 'video.mp4', '-i', dub_path,
         '-filter_complex', vf,
         '-map', '[v]', '-map', '[aout]',
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
@@ -211,18 +285,20 @@ for idx, moment in enumerate(moments):
         out_path
     ])
 
+    # Send to Telegram
     print('Sending Short ' + str(idx + 1) + ' to Telegram...')
     subprocess.run([
         'curl', '-s', '-X', 'POST',
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
         '-F', 'chat_id=' + CHAT_ID,
         '-F', 'video=@' + out_path,
-        '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments)) + ': ' + moment.get('reason', '')[:100]
+        '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments)) + ' (English Dub)'
     ])
     time.sleep(3)
 
+    # Cleanup
     try:
-        os.remove(tts_path)
+        os.remove(dub_path)
         os.remove(srt_path)
     except:
         pass
