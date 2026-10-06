@@ -3,11 +3,14 @@ from faster_whisper import WhisperModel
 from gtts import gTTS
 
 GROQ_KEY = os.environ['GROQ_API_KEY']
-VOICE = os.environ.get('VOICE_NAME', 'en-US-DavisNeural')
 CHAT_ID = os.environ.get('CHAT_ID', '')
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 DURATION = int(os.environ.get('DURATION', '45'))
 NUM_SHORTS = int(os.environ.get('NUM_SHORTS', '3'))
+
+YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '')
+YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '')
+YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN', '')
 
 
 def format_time(seconds):
@@ -25,7 +28,7 @@ def contains_non_english(text):
     return False
 
 
-def groq_call(prompt, max_tokens=2000, temp=0.3):
+def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
     url = 'https://api.groq.com/openai/v1/chat/completions'
     headers = {'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json'}
     payload = {
@@ -34,23 +37,106 @@ def groq_call(prompt, max_tokens=2000, temp=0.3):
         'temperature': temp,
         'max_tokens': max_tokens
     }
+    if json_mode:
+        payload['response_format'] = {'type': 'json_object'}
     for attempt in range(3):
         try:
             r = requests.post(url, headers=headers, json=payload, timeout=60)
-            print('Groq attempt ' + str(attempt + 1) + ', Status: ' + str(r.status_code))
             result = r.json()
             if 'choices' in result:
                 return result['choices'][0]['message']['content']
-            else:
-                print('Response: ' + str(result))
-                time.sleep(5)
         except Exception as e:
             print('Groq error: ' + str(e))
             time.sleep(5)
     return None
 
 
-# ---------- STEP 1: Transcribe with word timestamps ----------
+# ---------- YouTube Upload Functions ----------
+def get_youtube_access_token():
+    url = 'https://oauth2.googleapis.com/token'
+    data = {
+        'client_id': YT_CLIENT_ID,
+        'client_secret': YT_CLIENT_SECRET,
+        'refresh_token': YT_REFRESH_TOKEN,
+        'grant_type': 'refresh_token'
+    }
+    try:
+        r = requests.post(url, data=data, timeout=30)
+        result = r.json()
+        if 'access_token' in result:
+            return result['access_token']
+        else:
+            print('Token error: ' + str(result))
+    except Exception as e:
+        print('Token exception: ' + str(e))
+    return None
+
+
+def generate_yt_metadata(commentary, moment_text):
+    prompt = 'You are a YouTube Shorts SEO expert. Generate metadata for a viral Short.\n\n'
+    prompt += 'Context: ' + commentary + '\n\n'
+    prompt += 'Return a JSON object with these keys:\n'
+    prompt += '- "title": catchy YouTube Shorts title (max 90 chars, English, with 1-2 emojis)\n'
+    prompt += '- "description": 2-3 line engaging description in English with hashtags\n'
+    prompt += '- "tags": array of 10-15 English tags (no # symbol)\n\n'
+    prompt += 'JSON only, no other text.'
+
+    result = groq_call(prompt, max_tokens=500, temp=0.7, json_mode=True)
+    if result:
+        try:
+            data = json.loads(result)
+            return data
+        except Exception as e:
+            print('Metadata parse error: ' + str(e))
+
+    return {
+        'title': 'Viral Moment You Must See! 🔥',
+        'description': 'Watch this amazing viral moment! Subscribe for more.\n\n#Shorts #Viral #Trending',
+        'tags': ['shorts', 'viral', 'trending', 'amazing', 'usa']
+    }
+
+
+def upload_to_youtube(video_path, title, description, tags):
+    access_token = get_youtube_access_token()
+    if not access_token:
+        print('YouTube: Failed to get access token')
+        return None
+
+    url = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status'
+    headers = {'Authorization': 'Bearer ' + access_token}
+
+    metadata = {
+        'snippet': {
+            'title': title[:100],
+            'description': description[:5000],
+            'tags': tags[:15],
+            'categoryId': '24'
+        },
+        'status': {
+            'privacyStatus': 'public',
+            'selfDeclaredMadeForKids': False
+        }
+    }
+
+    try:
+        with open(video_path, 'rb') as f:
+            files = {
+                'metadata': ('metadata.json', json.dumps(metadata), 'application/json'),
+                'video': (os.path.basename(video_path), f, 'video/mp4')
+            }
+            r = requests.post(url, headers=headers, files=files, timeout=300)
+        result = r.json()
+        if 'id' in result:
+            print('YouTube upload success: https://youtu.be/' + result['id'])
+            return result['id']
+        else:
+            print('YouTube upload error: ' + str(result)[:500])
+    except Exception as e:
+        print('YouTube exception: ' + str(e))
+    return None
+
+
+# ---------- STEP 1: Transcribe ----------
 print('\n=== STEP 1: Whisper Transcription ===')
 model = WhisperModel('tiny', device='cpu', compute_type='int8')
 segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
@@ -70,16 +156,13 @@ transcript = '\n'.join(transcript_lines)
 print('Transcript ready with ' + str(total_words) + ' words')
 
 
-# ---------- STEP 2: Find viral moments (JSON MODE) ----------
-print('\n=== STEP 2: Find Viral Moments (Groq JSON mode) ===')
-prompt = 'You are a viral Shorts editor. Below is a timestamped English transcript of a YouTube video.\n\n'
-prompt += 'Your task: Find the ' + str(NUM_SHORTS) + ' BEST viral-worthy segments, each about ' + str(DURATION) + ' seconds long.\n'
-prompt += 'Each segment must be UNIQUE and NON-OVERLAPPING.\n'
-prompt += 'Focus on moments where the speaker says something surprising, emotional, controversial, funny, or highly engaging.\n\n'
-prompt += 'You MUST return a JSON object with key "moments" containing an array of objects.\n'
-prompt += 'Each object must have keys: "start" (number), "end" (number), "reason" (string).\n'
-prompt += 'Return exactly ' + str(NUM_SHORTS) + ' moments.\n'
-prompt += 'Example: {"moments": [{"start": 12.5, "end": 57.5, "reason": "shocking reveal"}, {"start": 120.0, "end": 165.0, "reason": "funny moment"}]}\n\n'
+# ---------- STEP 2: Find viral moments (JSON mode) ----------
+print('\n=== STEP 2: Find Viral Moments ===')
+prompt = 'You are a viral Shorts editor. Below is a timestamped English transcript.\n\n'
+prompt += 'Find the ' + str(NUM_SHORTS) + ' BEST viral-worthy segments, each about ' + str(DURATION) + ' seconds.\n'
+prompt += 'Each segment must be UNIQUE and NON-OVERLAPPING.\n\n'
+prompt += 'Return a JSON object with key "moments" containing array of objects with keys: "start", "end", "reason".\n'
+prompt += 'Return exactly ' + str(NUM_SHORTS) + ' moments.\n\n'
 prompt += 'Transcript:\n' + transcript
 
 url = 'https://api.groq.com/openai/v1/chat/completions'
@@ -115,7 +198,6 @@ if text:
         moments = data.get('moments', [])
     except Exception as e:
         print('JSON parse error: ' + str(e))
-        print('Raw text: ' + text[:500])
 
 if not moments:
     print('Fallback used')
@@ -124,25 +206,18 @@ if not moments:
 print('Got ' + str(len(moments)) + ' moments')
 
 
-# ---------- STEP 3: Generate English commentary ----------
+# ---------- STEP 3: Commentary ----------
 def gen_commentary(moment_text):
-    prompt = 'You are an ENGLISH voiceover writer for YouTube Shorts.\n\n'
-    prompt += 'Write a short, engaging ENGLISH commentary (maximum 40 words) for the video segment below.\n'
-    prompt += 'The original video may be in Hindi or any other language, but YOUR OUTPUT MUST BE PURE ENGLISH.\n\n'
-    prompt += 'STRICT RULES:\n'
-    prompt += '1. ONLY English text - no Hindi, no Devanagari, no other scripts\n'
-    prompt += '2. Do NOT write explanations, quotes, markdown, or labels\n'
-    prompt += '3. Just the plain English commentary as a single paragraph\n'
-    prompt += '4. Maximum 40 words\n'
-    prompt += '5. Hook the viewer in the first 3 words\n\n'
-    prompt += 'Segment transcript: ' + moment_text
+    prompt = 'Write a short, engaging ENGLISH commentary (max 40 words) for this video segment.\n'
+    prompt += 'OUTPUT MUST BE PURE ENGLISH. No Hindi, no Devanagari, no other scripts.\n'
+    prompt += 'Just the plain commentary, no labels, no quotes.\n\n'
+    prompt += 'Segment: ' + moment_text
     for attempt in range(3):
         result = groq_call(prompt, max_tokens=200, temp=0.7)
         if result:
             t = result.strip()
             if not contains_non_english(t):
                 return t
-            print('Non-English detected, retrying...')
     return 'Check out this amazing moment!'
 
 
@@ -160,7 +235,7 @@ def gen_tts(text, path):
     return False
 
 
-# ---------- STEP 5: Build SRT ----------
+# ---------- STEP 5: SRT ----------
 def build_srt(start, end, moment_segs):
     srt_lines = []
     idx = 1
@@ -213,34 +288,28 @@ for idx, moment in enumerate(moments):
             moment_segs.append(new_seg)
 
     if not moment_segs:
-        print('No segments in moment, skipping')
         continue
 
-    print('Generating commentary...')
     moment_text = ' '.join([s['text'] for s in moment_segs])
+
+    print('Generating commentary...')
     commentary = gen_commentary(moment_text)
     commentary = re.sub(r'["\'\n\r]', ' ', commentary).strip()[:300]
-    if not commentary:
-        commentary = 'Check out this amazing moment!'
     print('Commentary: ' + commentary)
 
     tts_path = 'tts_%d.mp3' % idx
-    print('Generating TTS...')
     if not gen_tts(commentary, tts_path):
-        print('TTS failed - creating silence')
         subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
                         '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', tts_path])
 
-    print('Building SRT...')
     srt_path = 'subs_%d.srt' % idx
-    srt_content = build_srt(0, duration, moment_segs)
     with open(srt_path, 'w', encoding='utf-8') as f:
-        f.write(srt_content)
+        f.write(build_srt(0, duration, moment_segs))
 
-    print('Rendering Short...')
     out_path = 'shorts_%d.mp4' % idx
     vf = "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,subtitles=" + srt_path + ":force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=50'[v];[0:a]volume=0.2[bg];[1:a]volume=1.0[ai];[bg][ai]amix=inputs=2:duration=first[aout]"
 
+    print('Rendering Short...')
     subprocess.run([
         'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
         '-i', 'video.mp4', '-i', tts_path,
@@ -251,15 +320,42 @@ for idx, moment in enumerate(moments):
         out_path
     ])
 
-    print('Sending Short ' + str(idx + 1) + ' to Telegram...')
+    print('Sending to Telegram...')
     subprocess.run([
         'curl', '-s', '-X', 'POST',
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
         '-F', 'chat_id=' + CHAT_ID,
         '-F', 'video=@' + out_path,
-        '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments)) + ' | AI Commentary + English Captions'
+        '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
     ])
-    time.sleep(3)
+    time.sleep(2)
+
+    print('Generating YouTube metadata...')
+    meta = generate_yt_metadata(commentary, moment_text)
+    print('Title: ' + meta.get('title', ''))
+
+    print('Uploading to YouTube...')
+    yt_id = upload_to_youtube(
+        out_path,
+        meta.get('title', 'Viral Short'),
+        meta.get('description', ''),
+        meta.get('tags', [])
+    )
+
+    if yt_id:
+        subprocess.run([
+            'curl', '-s', '-X', 'POST',
+            'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
+            '-d', 'chat_id=' + CHAT_ID,
+            '-d', 'text=✅ YouTube uploaded: https://youtu.be/' + yt_id
+        ])
+    else:
+        subprocess.run([
+            'curl', '-s', '-X', 'POST',
+            'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
+            '-d', 'chat_id=' + CHAT_ID,
+            '-d', 'text=⚠️ YouTube upload failed for Short ' + str(idx + 1)
+        ])
 
     try:
         os.remove(tts_path)
@@ -267,4 +363,4 @@ for idx, moment in enumerate(moments):
     except:
         pass
 
-print('\nAll shorts generated and sent!')
+print('\nAll shorts generated, sent, and uploaded!')
