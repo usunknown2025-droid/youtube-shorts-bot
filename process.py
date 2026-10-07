@@ -27,6 +27,16 @@ def contains_non_english(text):
     return False
 
 
+def get_audio_duration(path):
+    probe = subprocess.run(['ffprobe', '-v', 'error', '-show_entries',
+                            'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
+                            path], capture_output=True, text=True)
+    try:
+        return float(probe.stdout.strip())
+    except:
+        return 10.0
+
+
 def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
     url = 'https://api.groq.com/openai/v1/chat/completions'
     headers = {'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json'}
@@ -205,8 +215,8 @@ def gen_tts(text, path):
     return False
 
 
-# ---------- STEP 5: SRT ----------
-def build_srt(start, end, moment_segs):
+# ---------- STEP 5: SRT (with time offset for freeze) ----------
+def build_srt(start, end, moment_segs, time_offset=0):
     srt_lines = []
     idx = 1
     for seg in moment_segs:
@@ -216,11 +226,11 @@ def build_srt(start, end, moment_segs):
         growing = []
         for i, w in enumerate(words):
             growing.append(w['word'].strip())
-            s = max(w['start'] - start, 0)
+            s = max(w['start'] - start, 0) + time_offset
             if i + 1 < len(words):
-                e = words[i + 1]['start'] - start
+                e = words[i + 1]['start'] - start + time_offset
             else:
-                e = w['end'] - start
+                e = w['end'] - start + time_offset
             if e <= s:
                 e = s + 0.3
             text = ' '.join(growing)
@@ -270,17 +280,35 @@ for idx, moment in enumerate(moments):
         subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
                         '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', tts_path])
 
+    # Get TTS duration for freeze frame
+    tts_dur = get_audio_duration(tts_path)
+    if tts_dur < 3:
+        tts_dur = 10.0
+    print('TTS duration: %0.2f seconds (freeze frame)' % tts_dur)
+
     srt_path = 'subs_%d.srt' % idx
     with open(srt_path, 'w', encoding='utf-8') as f:
-        f.write(build_srt(0, duration, moment_segs))
+        f.write(build_srt(0, duration, moment_segs, tts_dur))
 
     out_path = 'shorts_%d.mp4' % idx
-    vf = "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,subtitles=" + srt_path + ":force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=50'[v];[0:a]volume=0.2[bg];[1:a]volume=1.0[ai];[bg][ai]amix=inputs=2:duration=first[aout]"
 
+    # VIDEO: freeze first frame for tts_dur, then play original clip
+    vf = ("[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,"
+          "tpad=start_duration=" + str(tts_dur) + ":start_mode=clone,"
+          "subtitles=" + srt_path + ":force_style='FontName=Arial,FontSize=18,"
+          "PrimaryColour=&H00FFFF&,OutlineColour=&H000000&,BorderStyle=1,"
+          "Outline=2,Shadow=1,Alignment=2,MarginV=50'[v]")
+
+    # AUDIO: concat TTS (freeze) + original clip audio
+    af = ("[1:a]volume=1.0[tts];"
+          "[0:a]volume=0.2[orig];"
+          "[tts][orig]concat=n=2:v=0:a=1[aout]")
+
+    print('Rendering Short with freeze frame...')
     subprocess.run([
         'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
         '-i', 'video.mp4', '-i', tts_path,
-        '-filter_complex', vf,
+        '-filter_complex', vf + ';' + af,
         '-map', '[v]', '-map', '[aout]',
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
         '-c:a', 'aac', '-b:a', '128k',
