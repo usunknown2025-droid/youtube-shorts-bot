@@ -54,6 +54,8 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
             result = r.json()
             if 'choices' in result:
                 return result['choices'][0]['message']['content']
+            else:
+                print('Groq response: ' + str(result)[:300])
         except Exception as e:
             print('Groq error: ' + str(e))
             time.sleep(5)
@@ -105,65 +107,88 @@ for s in segments:
     seg_data.append({'start': s.start, 'end': s.end, 'text': s.text.strip(), 'words': seg_words})
 
 print('Transcript ready with ' + str(total_words) + ' words')
+video_total_duration = seg_data[-1]['end'] if seg_data else 60
+print('Video total duration: %0.1f seconds' % video_total_duration)
 
 
-# ---------- STEP 2: Find viral moments (chunked, ask 2x) ----------
-print('\n=== STEP 2: Find Viral Moments (chunked) ===')
-lines = transcript_lines
-chunk_size = 3000
-chunks = []
-current = ''
-for line in lines:
-    if len(current) + len(line) > chunk_size:
-        if current:
-            chunks.append(current)
-        current = line + '\n'
-    else:
-        current += line + '\n'
-if current:
-    chunks.append(current)
+# ---------- STEP 2: Find viral moments ----------
+print('\n=== STEP 2: Find Viral Moments ===')
 
-print('Split transcript into ' + str(len(chunks)) + ' chunks')
+# Calculate how many moments are mathematically possible
+max_possible = int(video_total_duration // DURATION)
+print('Max possible non-overlapping moments: ' + str(max_possible))
+
+target_moments = min(NUM_SHORTS, max_possible)
+
+# Build prompt with explicit instructions
+prompt = 'You are analyzing a YouTube video transcript. Your job is to find viral moments.\n\n'
+prompt += 'REQUIREMENTS:\n'
+prompt += '- Find exactly ' + str(target_moments) + ' moments\n'
+prompt += '- Each moment should be approximately ' + str(DURATION) + ' seconds long\n'
+prompt += '- Moments MUST NOT overlap with each other\n'
+prompt += '- Spread them across the whole video, not clustered together\n\n'
+prompt += 'OUTPUT FORMAT (strict JSON):\n'
+prompt += '{"moments": [{"start": 12.5, "end": 57.5, "reason": "interesting moment"}]}\n\n'
+prompt += 'IMPORTANT: Return exactly ' + str(target_moments) + ' moments in the array.\n'
+prompt += 'Do NOT return empty array. If unsure, pick evenly distributed timestamps.\n\n'
+prompt += 'FULL TRANSCRIPT:\n'
+for s in seg_data:
+    prompt += '%0.1f-%0.1f: %s\n' % (s['start'], s['end'], s['text'])
+
+result = groq_call(prompt, max_tokens=2500, temp=0.3, json_mode=True)
+
 all_moments = []
+if result:
+    try:
+        data = json.loads(result)
+        all_moments = data.get('moments', [])
+        print('Groq returned ' + str(len(all_moments)) + ' moments')
+    except Exception as e:
+        print('JSON parse error: ' + str(e))
+        print('Raw: ' + result[:500])
 
-# Ask for 2x moments so we still have enough after overlap filtering
-target_moments = NUM_SHORTS * 2
-per_chunk = max(3, (target_moments + len(chunks) - 1) // len(chunks))
-
-for i, chunk in enumerate(chunks):
-    prompt = 'Find ' + str(per_chunk) + ' most viral/interesting moments in this transcript chunk.\n'
-    prompt += 'Each moment should be about ' + str(DURATION) + ' seconds long.\n'
-    prompt += 'Make sure moments are well-separated from each other (no overlaps).\n\n'
-    prompt += 'Return JSON: {"moments": [{"start": <sec>, "end": <sec>, "reason": "<why>"}]}\n\n'
-    prompt += 'Transcript chunk:\n' + chunk
-    result = groq_call(prompt, max_tokens=2500, temp=0.3, json_mode=True)
-    if result:
-        try:
-            data = json.loads(result)
-            ms = data.get('moments', [])
-            print('Chunk ' + str(i+1) + ': got ' + str(len(ms)) + ' moments')
-            all_moments.extend(ms)
-        except Exception as e:
-            print('Chunk ' + str(i+1) + ' parse error: ' + str(e))
-    time.sleep(5)
-
-print('Total raw moments: ' + str(len(all_moments)))
+# If Groq gave less than target, add evenly distributed moments as fallback
+if len(all_moments) < target_moments:
+    print('Adding evenly distributed moments as fallback...')
+    existing_starts = set(int(m.get('start', 0)) for m in all_moments)
+    for i in range(target_moments):
+        candidate_start = int(i * (video_total_duration - DURATION) / max(1, target_moments - 1)) if target_moments > 1 else 0
+        candidate_end = candidate_start + DURATION
+        if candidate_start in existing_starts:
+            continue
+        # Check overlap
+        overlap = False
+        for m in all_moments:
+            ms = float(m.get('start', 0))
+            me = float(m.get('end', 0))
+            if not (candidate_end <= ms or candidate_start >= me):
+                overlap = True
+                break
+        if not overlap:
+            all_moments.append({
+                'start': candidate_start,
+                'end': candidate_end,
+                'reason': 'fallback moment'
+            })
+        if len(all_moments) >= target_moments:
+            break
 
 all_moments.sort(key=lambda x: x.get('start', 0))
+
+# Final overlap filter
 filtered = []
 for m in all_moments:
     overlap = False
     for f in filtered:
-        # Skip if overlaps with already-selected moment
         if not (m['end'] <= f['start'] or m['start'] >= f['end']):
             overlap = True
             break
     if not overlap:
         filtered.append(m)
-    if len(filtered) >= NUM_SHORTS:
+    if len(filtered) >= target_moments:
         break
 
-moments = filtered[:NUM_SHORTS]
+moments = filtered[:target_moments]
 
 if not moments:
     print('Fallback used')
@@ -222,28 +247,32 @@ def gen_tts(text, path):
     return False
 
 
-# ---------- STEP 5: Combined SRT (commentary + captions) ----------
-def build_combined_srt(commentary, tts_dur, start, moment_segs):
-    """Commentary words (0 to tts_dur) + original captions (tts_dur onwards)"""
+# ---------- STEP 5: Two SRT files (commentary + captions) ----------
+def build_commentary_srt(commentary, tts_dur):
+    """SRT for commentary - shown on black screen"""
     lines = []
     idx = 1
-
-    # Part A: Commentary - growing word by word on black screen
     words = commentary.split()
-    if words:
-        word_dur = tts_dur / float(len(words))
-        growing = []
-        for i, w in enumerate(words):
-            growing.append(w)
-            s = i * word_dur
-            e = (i + 1) * word_dur
-            if e <= s:
-                e = s + 0.2
-            text = ' '.join(growing)
-            lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + text + '\n')
-            idx += 1
+    if not words:
+        return ''
+    word_dur = tts_dur / float(len(words))
+    growing = []
+    for i, w in enumerate(words):
+        growing.append(w)
+        s = i * word_dur
+        e = (i + 1) * word_dur
+        if e <= s:
+            e = s + 0.2
+        text = ' '.join(growing)
+        lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + text + '\n')
+        idx += 1
+    return '\n'.join(lines)
 
-    # Part B: Original captions (offset by tts_dur)
+
+def build_captions_srt(start, tts_dur, moment_segs):
+    """SRT for original video captions - shown on video (after black screen)"""
+    lines = []
+    idx = 1
     for seg in moment_segs:
         seg_words = seg.get('words', [])
         if not seg_words:
@@ -261,7 +290,6 @@ def build_combined_srt(commentary, tts_dur, start, moment_segs):
             text = ' '.join(growing)
             lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + text + '\n')
             idx += 1
-
     return '\n'.join(lines)
 
 
@@ -306,25 +334,33 @@ for idx, moment in enumerate(moments):
         subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
                         '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', tts_path])
 
-    # Freeze duration = exact TTS length (+ 0.4 sec buffer)
     tts_dur = get_audio_duration(tts_path) + 0.4
-    print('TTS duration: %0.2f seconds (black screen duration)' % tts_dur)
+    print('TTS duration: %0.2f seconds' % tts_dur)
 
-    # Build combined SRT
-    srt_path = 'subs_%d.srt' % idx
-    with open(srt_path, 'w', encoding='utf-8') as f:
-        f.write(build_combined_srt(commentary, tts_dur, 0, moment_segs))
+    # Two separate SRT files
+    commentary_srt = 'commentary_%d.srt' % idx
+    with open(commentary_srt, 'w', encoding='utf-8') as f:
+        f.write(build_commentary_srt(commentary, tts_dur))
+
+    captions_srt = 'captions_%d.srt' % idx
+    with open(captions_srt, 'w', encoding='utf-8') as f:
+        f.write(build_captions_srt(0, tts_dur, moment_segs))
 
     out_path = 'shorts_%d.mp4' % idx
 
-    # Black screen for tts_dur, then original cropped video
-    # MarginV=60 (captions lower, Reels style)
+    # Two subtitle filters:
+    # 1. Commentary at MarginV=280 (middle of 1280-height screen roughly)
+    # 2. Video captions at MarginV=60 (bottom, Reels style)
     vf = ("color=black:s=720x1280:d=" + str(tts_dur) + ":r=30[black];"
           "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];"
           "[black][v0]concat=n=2:v=1:a=0[vcat];"
-          "[vcat]subtitles=" + srt_path +
-          ":force_style='FontName=Arial,FontSize=20,PrimaryColour=&H00FFFF&,"
+          "[vcat]subtitles=" + commentary_srt +
+          ":force_style='FontName=Arial,FontSize=22,PrimaryColour=&H00FFFF&,"
           "OutlineColour=&H000000&,BorderStyle=1,Outline=3,Shadow=2,"
+          "Alignment=2,MarginV=300'[v1];"
+          "[v1]subtitles=" + captions_srt +
+          ":force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,"
+          "OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,"
           "Alignment=2,MarginV=60'[v]")
 
     # Audio: TTS + original clip audio
@@ -332,7 +368,7 @@ for idx, moment in enumerate(moments):
           "[0:a]volume=0.2[orig];"
           "[tts][orig]concat=n=2:v=0:a=1[aout]")
 
-    print('Rendering Short with black screen + word-by-word commentary...')
+    print('Rendering Short...')
     subprocess.run([
         'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
         '-i', 'video.mp4', '-i', tts_path,
@@ -343,7 +379,7 @@ for idx, moment in enumerate(moments):
         out_path
     ])
 
-    # Send video to Telegram and get file_id
+    # Send to Telegram
     print('Sending to Telegram...')
     tg_response = subprocess.run([
         'curl', '-s', '-X', 'POST',
@@ -366,14 +402,12 @@ for idx, moment in enumerate(moments):
         print('Failed to get file_id, skipping Supabase save')
         continue
 
-    # Generate metadata
     print('Generating YouTube metadata...')
     meta = gen_yt_metadata(commentary)
     title = meta.get('title', 'Viral Short')
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
 
-    # Save to Supabase
     print('Saving to Supabase...')
     row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags)
     print('Supabase row ID: ' + str(row_id))
@@ -404,7 +438,8 @@ for idx, moment in enumerate(moments):
 
     try:
         os.remove(tts_path)
-        os.remove(srt_path)
+        os.remove(commentary_srt)
+        os.remove(captions_srt)
     except:
         pass
 
