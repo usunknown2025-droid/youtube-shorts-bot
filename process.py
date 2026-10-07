@@ -107,7 +107,7 @@ for s in segments:
 print('Transcript ready with ' + str(total_words) + ' words')
 
 
-# ---------- STEP 2: Find viral moments (chunked) ----------
+# ---------- STEP 2: Find viral moments (chunked, ask 2x) ----------
 print('\n=== STEP 2: Find Viral Moments (chunked) ===')
 lines = transcript_lines
 chunk_size = 3000
@@ -125,14 +125,18 @@ if current:
 
 print('Split transcript into ' + str(len(chunks)) + ' chunks')
 all_moments = []
-per_chunk = max(1, (NUM_SHORTS + len(chunks) - 1) // len(chunks))
+
+# Ask for 2x moments so we still have enough after overlap filtering
+target_moments = NUM_SHORTS * 2
+per_chunk = max(3, (target_moments + len(chunks) - 1) // len(chunks))
 
 for i, chunk in enumerate(chunks):
     prompt = 'Find ' + str(per_chunk) + ' most viral/interesting moments in this transcript chunk.\n'
-    prompt += 'Each moment should be about ' + str(DURATION) + ' seconds long.\n\n'
+    prompt += 'Each moment should be about ' + str(DURATION) + ' seconds long.\n'
+    prompt += 'Make sure moments are well-separated from each other (no overlaps).\n\n'
     prompt += 'Return JSON: {"moments": [{"start": <sec>, "end": <sec>, "reason": "<why>"}]}\n\n'
     prompt += 'Transcript chunk:\n' + chunk
-    result = groq_call(prompt, max_tokens=1500, temp=0.3, json_mode=True)
+    result = groq_call(prompt, max_tokens=2500, temp=0.3, json_mode=True)
     if result:
         try:
             data = json.loads(result)
@@ -143,11 +147,14 @@ for i, chunk in enumerate(chunks):
             print('Chunk ' + str(i+1) + ' parse error: ' + str(e))
     time.sleep(5)
 
+print('Total raw moments: ' + str(len(all_moments)))
+
 all_moments.sort(key=lambda x: x.get('start', 0))
 filtered = []
 for m in all_moments:
     overlap = False
     for f in filtered:
+        # Skip if overlaps with already-selected moment
         if not (m['end'] <= f['start'] or m['start'] >= f['end']):
             overlap = True
             break
@@ -162,7 +169,7 @@ if not moments:
     print('Fallback used')
     moments = [{'start': 0, 'end': DURATION, 'reason': 'fallback'}]
 
-print('Final: Got ' + str(len(moments)) + ' moments')
+print('Final: Got ' + str(len(moments)) + ' moments (requested: ' + str(NUM_SHORTS) + ')')
 
 
 # ---------- STEP 3: Commentary ----------
@@ -311,13 +318,14 @@ for idx, moment in enumerate(moments):
     out_path = 'shorts_%d.mp4' % idx
 
     # Black screen for tts_dur, then original cropped video
+    # MarginV=60 (captions lower, Reels style)
     vf = ("color=black:s=720x1280:d=" + str(tts_dur) + ":r=30[black];"
           "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];"
           "[black][v0]concat=n=2:v=1:a=0[vcat];"
           "[vcat]subtitles=" + srt_path +
-          ":force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFF&,"
+          ":force_style='FontName=Arial,FontSize=20,PrimaryColour=&H00FFFF&,"
           "OutlineColour=&H000000&,BorderStyle=1,Outline=3,Shadow=2,"
-          "Alignment=2,MarginV=100'[v]")
+          "Alignment=2,MarginV=60'[v]")
 
     # Audio: TTS + original clip audio
     af = ("[1:a]volume=1.0[tts];"
