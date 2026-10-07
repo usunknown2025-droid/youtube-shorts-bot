@@ -62,7 +62,7 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
     return None
 
 
-def save_to_supabase(chat_id, file_id, title, description, tags):
+def save_to_supabase(chat_id, file_id, title, description, tags, short_number):
     url = SUPABASE_URL + '/rest/v1/pending_shorts'
     headers = {
         'apikey': SUPABASE_KEY,
@@ -76,7 +76,9 @@ def save_to_supabase(chat_id, file_id, title, description, tags):
         'title': title,
         'description': description,
         'tags': tags,
-        'status': 'pending'
+        'status': 'pending',
+        'short_number': short_number,
+        'upload_status': 'pending'
     }
     try:
         r = requests.post(url, headers=headers, json=data, timeout=30)
@@ -248,7 +250,6 @@ def ass_time(seconds):
 
 
 def build_combined_ass(commentary, tts_dur, moment_segs):
-    """Single ASS file with two styles: Commentary (middle) + Caption (bottom)"""
     lines = []
     lines.append('[Script Info]')
     lines.append('ScriptType: v4.00+')
@@ -259,15 +260,12 @@ def build_combined_ass(commentary, tts_dur, moment_segs):
     lines.append('')
     lines.append('[V4+ Styles]')
     lines.append('Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding')
-    # Commentary style: Alignment=5 (middle-center), yellow, size 35
     lines.append('Style: Commentary,Arial,35,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,5,30,30,0,1')
-    # Caption style: Alignment=2 (bottom-center), size 80, MarginV=400 (350-550 range)
     lines.append('Style: Caption,Arial,80,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,2,30,30,400,1')
     lines.append('')
     lines.append('[Events]')
     lines.append('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text')
 
-    # Part A: Commentary word-by-word (on black screen)
     words = commentary.split()
     if words:
         word_dur = tts_dur / float(len(words))
@@ -281,7 +279,6 @@ def build_combined_ass(commentary, tts_dur, moment_segs):
             text = ' '.join(growing)
             lines.append('Dialogue: 0,%s,%s,Commentary,,0,0,0,,%s' % (ass_time(s), ass_time(e), text))
 
-    # Part B: Video captions word-by-word (on video after black screen)
     for seg in moment_segs:
         seg_words = seg.get('words', [])
         if not seg_words:
@@ -407,28 +404,35 @@ for idx, moment in enumerate(moments):
     tags = ', '.join(meta.get('tags', []))
 
     print('Saving to Supabase...')
-    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags)
+    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1)
     print('Supabase row ID: ' + str(row_id))
 
     if row_id:
-        approval_text = '📝 Title: ' + title + '\n\n'
-        approval_text += '📄 Description: ' + description[:200] + '...\n\n'
-        approval_text += '🏷️ Tags: ' + tags[:200] + '\n\n'
-        approval_text += 'Kya karna hai?'
-
+        # 4 buttons in 2 rows
         keyboard = json.dumps({
-            'inline_keyboard': [[
-                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
-                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
-                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
-            ]]
+            'inline_keyboard': [
+                [
+                    {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
+                    {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
+                ],
+                [
+                    {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
+                    {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
+                ]
+            ]
         })
+
+        approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
+        approval_text += '📄 Title: ' + title + '\n\n'
+        approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
+        approval_text += 'Kya karna hai?'
 
         subprocess.run([
             'curl', '-s', '-X', 'POST',
             'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
             '-d', 'chat_id=' + CHAT_ID,
             '-d', 'text=' + approval_text,
+            '-d', 'parse_mode=Markdown',
             '-d', 'reply_markup=' + keyboard
         ])
 
