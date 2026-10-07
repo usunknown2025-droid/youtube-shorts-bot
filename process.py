@@ -259,10 +259,10 @@ def build_combined_ass(commentary, tts_dur, moment_segs):
     lines.append('')
     lines.append('[V4+ Styles]')
     lines.append('Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding')
-    # Commentary style: Alignment=5 (middle-center), yellow, size 26
-    lines.append('Style: Commentary,Arial,26,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,2,5,30,30,0,1')
-    # Caption style: Alignment=2 (bottom-center), bigger (30), higher up (MarginV=100)
-    lines.append('Style: Caption,Arial,30,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,2,2,30,30,100,1')
+    # Commentary style: Alignment=5 (middle-center), yellow, size 35
+    lines.append('Style: Commentary,Arial,35,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,5,30,30,0,1')
+    # Caption style: Alignment=2 (bottom-center), size 80, MarginV=400 (350-550 range)
+    lines.append('Style: Caption,Arial,80,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,2,30,30,400,1')
     lines.append('')
     lines.append('[Events]')
     lines.append('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text')
