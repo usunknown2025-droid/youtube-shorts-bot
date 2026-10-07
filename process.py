@@ -113,14 +113,10 @@ print('Video total duration: %0.1f seconds' % video_total_duration)
 
 # ---------- STEP 2: Find viral moments ----------
 print('\n=== STEP 2: Find Viral Moments ===')
-
-# Calculate how many moments are mathematically possible
 max_possible = int(video_total_duration // DURATION)
 print('Max possible non-overlapping moments: ' + str(max_possible))
-
 target_moments = min(NUM_SHORTS, max_possible)
 
-# Build prompt with explicit instructions
 prompt = 'You are analyzing a YouTube video transcript. Your job is to find viral moments.\n\n'
 prompt += 'REQUIREMENTS:\n'
 prompt += '- Find exactly ' + str(target_moments) + ' moments\n'
@@ -147,7 +143,6 @@ if result:
         print('JSON parse error: ' + str(e))
         print('Raw: ' + result[:500])
 
-# If Groq gave less than target, add evenly distributed moments as fallback
 if len(all_moments) < target_moments:
     print('Adding evenly distributed moments as fallback...')
     existing_starts = set(int(m.get('start', 0)) for m in all_moments)
@@ -156,7 +151,6 @@ if len(all_moments) < target_moments:
         candidate_end = candidate_start + DURATION
         if candidate_start in existing_starts:
             continue
-        # Check overlap
         overlap = False
         for m in all_moments:
             ms = float(m.get('start', 0))
@@ -174,8 +168,6 @@ if len(all_moments) < target_moments:
             break
 
 all_moments.sort(key=lambda x: x.get('start', 0))
-
-# Final overlap filter
 filtered = []
 for m in all_moments:
     overlap = False
@@ -247,49 +239,73 @@ def gen_tts(text, path):
     return False
 
 
-# ---------- STEP 5: Two SRT files (commentary + captions) ----------
-def build_commentary_srt(commentary, tts_dur):
-    """SRT for commentary - shown on black screen"""
+# ---------- STEP 5: Combined ASS (commentary middle + captions bottom) ----------
+def ass_time(seconds):
+    hrs = int(seconds // 3600)
+    mins = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return '%d:%02d:%05.2f' % (hrs, mins, secs)
+
+
+def build_combined_ass(commentary, tts_dur, moment_segs):
+    """Single ASS file with two styles: Commentary (middle) + Caption (bottom)"""
     lines = []
-    idx = 1
+    lines.append('[Script Info]')
+    lines.append('ScriptType: v4.00+')
+    lines.append('PlayResX: 720')
+    lines.append('PlayResY: 1280')
+    lines.append('WrapStyle: 0')
+    lines.append('ScaledBorderAndShadow: yes')
+    lines.append('')
+    lines.append('[V4+ Styles]')
+    lines.append('Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding')
+    # Commentary style: Alignment=5 (middle-center), big yellow text
+    lines.append('Style: Commentary,Arial,26,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,2,5,30,30,0,1')
+    # Caption style: Alignment=2 (bottom-center), smaller text, MarginV=60
+    lines.append('Style: Caption,Arial,18,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,2,30,30,60,1')
+    lines.append('')
+    lines.append('[Events]')
+    lines.append('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text')
+
+    # Part A: Commentary word-by-word (on black screen)
     words = commentary.split()
-    if not words:
-        return ''
-    word_dur = tts_dur / float(len(words))
-    growing = []
-    for i, w in enumerate(words):
-        growing.append(w)
-        s = i * word_dur
-        e = (i + 1) * word_dur
-        if e <= s:
-            e = s + 0.2
-        text = ' '.join(growing)
-        lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + text + '\n')
-        idx += 1
-    return '\n'.join(lines)
+    if words:
+        word_dur = tts_dur / float(len(words))
+        growing = []
+        for i, w in enumerate(words):
+            growing.append(w)
+            s = i * word_dur
+            e = (i + 1) * word_dur
+            if e <= s:
+                e = s + 0.2
+            text = ' '.join(growing)
+            lines.append('Dialogue: 0,%s,%s,Commentary,,0,0,0,,%s' % (ass_time(s), ass_time(e), text))
 
-
-def build_captions_srt(start, tts_dur, moment_segs):
-    """SRT for original video captions - shown on video (after black screen)"""
-    lines = []
-    idx = 1
+    # Part B: Video captions word-by-word (on video after black screen)
     for seg in moment_segs:
         seg_words = seg.get('words', [])
         if not seg_words:
+            # Fallback: use full segment text with segment timing
+            seg_text = seg.get('text', '').strip()
+            if seg_text:
+                s = seg.get('start', 0) + tts_dur
+                e = seg.get('end', 0) + tts_dur
+                if e > s:
+                    lines.append('Dialogue: 0,%s,%s,Caption,,0,0,0,,%s' % (ass_time(s), ass_time(e), seg_text))
             continue
         growing = []
         for i, w in enumerate(seg_words):
             growing.append(w['word'].strip())
-            s = max(w['start'] - start, 0) + tts_dur
+            s = w['start'] + tts_dur
             if i + 1 < len(seg_words):
-                e = seg_words[i + 1]['start'] - start + tts_dur
+                e = seg_words[i + 1]['start'] + tts_dur
             else:
-                e = w['end'] - start + tts_dur
+                e = w['end'] + tts_dur
             if e <= s:
                 e = s + 0.3
             text = ' '.join(growing)
-            lines.append(str(idx) + '\n' + format_time(s) + ' --> ' + format_time(e) + '\n' + text + '\n')
-            idx += 1
+            lines.append('Dialogue: 0,%s,%s,Caption,,0,0,0,,%s' % (ass_time(s), ass_time(e), text))
+
     return '\n'.join(lines)
 
 
@@ -337,33 +353,20 @@ for idx, moment in enumerate(moments):
     tts_dur = get_audio_duration(tts_path) + 0.4
     print('TTS duration: %0.2f seconds' % tts_dur)
 
-    # Two separate SRT files
-    commentary_srt = 'commentary_%d.srt' % idx
-    with open(commentary_srt, 'w', encoding='utf-8') as f:
-        f.write(build_commentary_srt(commentary, tts_dur))
-
-    captions_srt = 'captions_%d.srt' % idx
-    with open(captions_srt, 'w', encoding='utf-8') as f:
-        f.write(build_captions_srt(0, tts_dur, moment_segs))
+    # Single ASS file with two styles
+    ass_path = 'subs_%d.ass' % idx
+    with open(ass_path, 'w', encoding='utf-8') as f:
+        f.write(build_combined_ass(commentary, tts_dur, moment_segs))
 
     out_path = 'shorts_%d.mp4' % idx
 
-    # Two subtitle filters:
-    # 1. Commentary at MarginV=280 (middle of 1280-height screen roughly)
-    # 2. Video captions at MarginV=60 (bottom, Reels style)
+    # Black screen + cropped video, single ASS overlay
     vf = ("color=black:s=720x1280:d=" + str(tts_dur) + ":r=30[black];"
           "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];"
           "[black][v0]concat=n=2:v=1:a=0[vcat];"
-          "[vcat]subtitles=" + commentary_srt +
-          ":force_style='FontName=Arial,FontSize=22,PrimaryColour=&H00FFFF&,"
-          "OutlineColour=&H000000&,BorderStyle=1,Outline=3,Shadow=2,"
-          "Alignment=2,MarginV=300'[v1];"
-          "[v1]subtitles=" + captions_srt +
-          ":force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFF&,"
-          "OutlineColour=&H000000&,BorderStyle=1,Outline=2,Shadow=1,"
-          "Alignment=2,MarginV=60'[v]")
+          "[vcat]ass=" + ass_path + "[v]")
 
-    # Audio: TTS + original clip audio
+    # Audio: TTS + original clip audio (concat)
     af = ("[1:a]volume=1.0[tts];"
           "[0:a]volume=0.2[orig];"
           "[tts][orig]concat=n=2:v=0:a=1[aout]")
@@ -438,8 +441,7 @@ for idx, moment in enumerate(moments):
 
     try:
         os.remove(tts_path)
-        os.remove(commentary_srt)
-        os.remove(captions_srt)
+        os.remove(ass_path)
     except:
         pass
 
