@@ -259,10 +259,10 @@ def build_combined_ass(commentary, tts_dur, moment_segs):
     lines.append('')
     lines.append('[V4+ Styles]')
     lines.append('Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding')
-    # Commentary style: Alignment=5 (middle-center), big yellow text
+    # Commentary style: Alignment=5 (middle-center), yellow, size 26
     lines.append('Style: Commentary,Arial,26,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,2,5,30,30,0,1')
-    # Caption style: Alignment=2 (bottom-center), smaller text, MarginV=60
-    lines.append('Style: Caption,Arial,18,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,1,2,30,30,60,1')
+    # Caption style: Alignment=2 (bottom-center), bigger (30), higher up (MarginV=100)
+    lines.append('Style: Caption,Arial,30,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,3,2,2,30,30,100,1')
     lines.append('')
     lines.append('[Events]')
     lines.append('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text')
@@ -285,7 +285,6 @@ def build_combined_ass(commentary, tts_dur, moment_segs):
     for seg in moment_segs:
         seg_words = seg.get('words', [])
         if not seg_words:
-            # Fallback: use full segment text with segment timing
             seg_text = seg.get('text', '').strip()
             if seg_text:
                 s = seg.get('start', 0) + tts_dur
@@ -353,20 +352,17 @@ for idx, moment in enumerate(moments):
     tts_dur = get_audio_duration(tts_path) + 0.4
     print('TTS duration: %0.2f seconds' % tts_dur)
 
-    # Single ASS file with two styles
     ass_path = 'subs_%d.ass' % idx
     with open(ass_path, 'w', encoding='utf-8') as f:
         f.write(build_combined_ass(commentary, tts_dur, moment_segs))
 
     out_path = 'shorts_%d.mp4' % idx
 
-    # Black screen + cropped video, single ASS overlay
     vf = ("color=black:s=720x1280:d=" + str(tts_dur) + ":r=30[black];"
           "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];"
           "[black][v0]concat=n=2:v=1:a=0[vcat];"
           "[vcat]ass=" + ass_path + "[v]")
 
-    # Audio: TTS + original clip audio (concat)
     af = ("[1:a]volume=1.0[tts];"
           "[0:a]volume=0.2[orig];"
           "[tts][orig]concat=n=2:v=0:a=1[aout]")
@@ -382,7 +378,6 @@ for idx, moment in enumerate(moments):
         out_path
     ])
 
-    # Send to Telegram
     print('Sending to Telegram...')
     tg_response = subprocess.run([
         'curl', '-s', '-X', 'POST',
