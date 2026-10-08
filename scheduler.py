@@ -1,9 +1,10 @@
 import os, requests, time
 from datetime import datetime, timezone
 
+BOT_TOKEN = os.environ['BOT_TOKEN']
 SUPABASE_URL = os.environ['SUPABASE_URL'].rstrip('/')
 SUPABASE_KEY = os.environ['SUPABASE_KEY']
-GH_PAT = os.environ['GH_PAT']
+GITHUB_TOKEN = os.environ['GITHUB_TOKEN']
 
 REPO = 'usunknown2025-droid/youtube-shorts-bot'
 
@@ -26,7 +27,7 @@ def get_due_shorts():
 def trigger_upload(row):
     url = f"https://api.github.com/repos/{REPO}/actions/workflows/upload.yml/dispatches"
     headers = {
-        'Authorization': f'Bearer {GH_PAT}',
+        'Authorization': f'Bearer {GITHUB_TOKEN}',
         'Accept': 'application/vnd.github+json',
         'Content-Type': 'application/json'
     }
