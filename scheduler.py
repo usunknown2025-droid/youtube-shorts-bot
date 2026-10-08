@@ -10,7 +10,7 @@ REPO = 'usunknown2025-droid/youtube-shorts-bot'
 
 
 def get_due_shorts():
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     url = f"{SUPABASE_URL}/rest/v1/pending_shorts?upload_status=eq.scheduled&scheduled_for=lte.{now}"
     headers = {
         'apikey': SUPABASE_KEY,
