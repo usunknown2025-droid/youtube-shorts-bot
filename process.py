@@ -444,6 +444,7 @@ for idx, moment in enumerate(moments):
 
         approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
         approval_text += '📄 Title: ' + title + '\n\n'
+        approval_text += '📝 Description: ' + description + '\n\n'
         approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
         approval_text += 'Kya karna hai?'
 
