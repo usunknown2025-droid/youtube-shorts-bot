@@ -527,8 +527,8 @@ for idx, moment in enumerate(moments):
             '-d', 'reply_markup=' + keyboard
         ])
 
-        # Send thumbnails
+        # Send thumbnails with select buttons
         for ti, thumb_url in enumerate(thumbnail_urls):
-            subprocess.run([
-                'curl', '-s', '-X', 'POST',
-                'https://api
+            thumb_keyboard = json.dumps({
+                'inline_keyboard': [[
+ 
