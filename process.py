@@ -11,9 +11,6 @@ NUM_SHORTS = int(os.environ.get('NUM_SHORTS', '3'))
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
-print('DEBUG - BOT_TOKEN length: ' + str(len(BOT_TOKEN)))
-print('DEBUG - CHAT_ID: ' + CHAT_ID)
-
 
 def contains_non_english(text):
     for ch in text:
@@ -52,7 +49,6 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
             else:
                 print('Groq response: ' + str(result)[:300])
                 if 'rate limit' in str(result).lower() or 'rate_limit' in str(result).lower():
-                    print('Rate limit hit, waiting 60 seconds...')
                     time.sleep(60)
                 else:
                     time.sleep(5)
@@ -93,15 +89,12 @@ def save_to_supabase(chat_id, file_id, title, description, tags, short_number, t
     return None
 
 
-# ---------- STEP 1: Transcribe ----------
 print('\n=== STEP 1: Whisper Transcription ===')
 model = WhisperModel('tiny', device='cpu', compute_type='int8')
 segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
-transcript_lines = []
 seg_data = []
 total_words = 0
 for s in segments:
-    transcript_lines.append('%0.1f-%0.1f: %s' % (s.start, s.end, s.text))
     seg_words = []
     if s.words:
         for w in s.words:
@@ -114,10 +107,8 @@ video_total_duration = seg_data[-1]['end'] if seg_data else 60
 print('Video total duration: %0.1f seconds' % video_total_duration)
 
 
-# ---------- STEP 2: Find viral moments ----------
 print('\n=== STEP 2: Find Viral Moments ===')
 max_possible = int(video_total_duration // DURATION)
-print('Max possible non-overlapping moments: ' + str(max_possible))
 target_moments = min(NUM_SHORTS, max_possible)
 
 combined_text = ' '.join([s['text'] for s in seg_data])
@@ -145,10 +136,8 @@ if result:
         print('Groq returned ' + str(len(all_moments)) + ' moments')
     except Exception as e:
         print('JSON parse error: ' + str(e))
-        print('Raw: ' + result[:500])
 
 if len(all_moments) < target_moments:
-    print('Adding evenly distributed moments as fallback...')
     existing_starts = set(int(m.get('start', 0)) for m in all_moments)
     for i in range(target_moments):
         candidate_start = int(i * (video_total_duration - DURATION) / max(1, target_moments - 1)) if target_moments > 1 else 0
@@ -163,11 +152,7 @@ if len(all_moments) < target_moments:
                 overlap = True
                 break
         if not overlap:
-            all_moments.append({
-                'start': candidate_start,
-                'end': candidate_end,
-                'reason': 'fallback moment'
-            })
+            all_moments.append({'start': candidate_start, 'end': candidate_end, 'reason': 'fallback'})
         if len(all_moments) >= target_moments:
             break
 
@@ -185,15 +170,11 @@ for m in all_moments:
         break
 
 moments = filtered[:target_moments]
-
 if not moments:
-    print('Fallback used')
     moments = [{'start': 0, 'end': DURATION, 'reason': 'fallback'}]
+print('Final: Got ' + str(len(moments)) + ' moments')
 
-print('Final: Got ' + str(len(moments)) + ' moments (requested: ' + str(NUM_SHORTS) + ')')
 
-
-# ---------- STEP 3: Commentary ----------
 def gen_commentary(moment_text):
     prompt = 'Write short ENGLISH commentary (max 40 words). PURE ENGLISH only. Describe the SPECIFIC action happening.\n\n'
     prompt += 'Segment: ' + moment_text[:800]
@@ -212,10 +193,10 @@ def gen_yt_metadata(moment_text, commentary):
     prompt += 'TRANSCRIPT: ' + moment_text[:800] + '\n\n'
     prompt += 'COMMENTARY: ' + commentary[:300] + '\n\n'
     prompt += 'RULES:\n'
-    prompt += '1. Title must mention the SPECIFIC event (not generic "Amazing/Viral/Incredible" alone)\n'
-    prompt += '2. Description must describe what actually happens (2-3 lines)\n'
-    prompt += '3. Tags must include content-specific ones (sport name, animal, action)\n\n'
-    prompt += 'Return ONLY JSON (no markdown):\n'
+    prompt += '1. Title must mention SPECIFIC event\n'
+    prompt += '2. Description must describe what happens (2-3 lines)\n'
+    prompt += '3. Tags must include content-specific ones\n\n'
+    prompt += 'Return ONLY JSON:\n'
     prompt += '{"title": "...", "description": "...", "tags": ["tag1", "tag2"]}'
     result = groq_call(prompt, max_tokens=500, temp=0.5, json_mode=True)
     if result:
@@ -231,14 +212,12 @@ def gen_yt_metadata(moment_text, commentary):
             print('Metadata parse error: ' + str(e))
     return {
         'title': 'Viral Moment You Must See! 🔥',
-        'description': 'Watch this amazing viral moment! Subscribe for more.\n\n#Shorts #Viral #Trending',
-        'tags': ['shorts', 'viral', 'trending', 'amazing', 'usa']
+        'description': 'Watch this amazing viral moment!\n\n#Shorts #Viral',
+        'tags': ['shorts', 'viral', 'trending']
     }
 
 
-# ---------- STEP 3.5: Thumbnail Generation (Frame + Bold Text) ----------
 def gen_frame_thumbnails(video_path, moment_start, moment_duration, title, output_prefix):
-    """Extract 4 frames from video and add bold yellow text overlay"""
     text_words = title.split()[:4]
     thumb_text = ' '.join(text_words).upper()
     thumb_text = re.sub(r'[^A-Z0-9 ]', '', thumb_text)
@@ -248,13 +227,11 @@ def gen_frame_thumbnails(video_path, moment_start, moment_duration, title, outpu
 
     positions = [0.2, 0.45, 0.7, 0.9]
     thumbnails = []
-
     font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 
     for i, pos in enumerate(positions):
         timestamp = moment_start + (moment_duration * pos)
         out_path = '%s_%d.jpg' % (output_prefix, i)
-
         vf = (
             "scale=720:1280:force_original_aspect_ratio=increase,"
             "crop=720:1280,"
@@ -264,22 +241,17 @@ def gen_frame_thumbnails(video_path, moment_start, moment_duration, title, outpu
             "x=(w-text_w)/2:y=h*0.08:"
             "fontfile=" + font_path
         )
-
         subprocess.run([
             'ffmpeg', '-y', '-ss', str(timestamp), '-i', video_path,
             '-vframes', '1', '-vf', vf, '-q:v', '2', out_path
         ], capture_output=True)
-
         if os.path.exists(out_path):
             thumbnails.append(out_path)
-            print('Thumbnail %d created: %s' % (i + 1, out_path))
-        else:
-            print('Thumbnail %d failed' % (i + 1))
+            print('Thumbnail %d created' % (i + 1))
 
     return thumbnails
 
 
-# ---------- STEP 4: TTS ----------
 def gen_tts(text, path):
     for attempt in range(3):
         try:
@@ -293,7 +265,6 @@ def gen_tts(text, path):
     return False
 
 
-# ---------- STEP 5: Combined ASS ----------
 def ass_time(seconds):
     hrs = int(seconds // 3600)
     mins = int((seconds % 3600) // 60)
@@ -378,7 +349,6 @@ def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
     return '\n'.join(lines)
 
 
-# ---------- STEP 6: Process each moment ----------
 for idx, moment in enumerate(moments):
     print('\n========== SHORT ' + str(idx + 1) + '/' + str(len(moments)) + ' ==========')
     start = float(moment['start'])
@@ -421,24 +391,20 @@ for idx, moment in enumerate(moments):
 
     actual_tts_dur = get_audio_duration(tts_path)
     tts_dur = actual_tts_dur + 0.4
-    print('TTS duration: %0.2f seconds' % tts_dur)
 
     ass_path = 'subs_%d.ass' % idx
     with open(ass_path, 'w', encoding='utf-8') as f:
         f.write(build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur))
 
     out_path = 'shorts_%d.mp4' % idx
-
     vf = ("color=black:s=720x1280:d=" + str(tts_dur) + ":r=30[black];"
           "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];"
           "[black][v0]concat=n=2:v=1:a=0[vcat];"
           "[vcat]ass=" + ass_path + "[v]")
-
     af = ("[1:a]volume=1.0[tts];"
           "[0:a]volume=0.2[orig];"
           "[tts][orig]concat=n=2:v=0:a=1[aout]")
 
-    print('Rendering Short...')
     subprocess.run([
         'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
         '-i', 'video.mp4', '-i', tts_path,
@@ -458,8 +424,6 @@ for idx, moment in enumerate(moments):
         '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
     ], capture_output=True, text=True)
 
-    print('DEBUG TG stdout: ' + tg_response.stdout[:300])
-
     file_id = None
     try:
         tg_json = json.loads(tg_response.stdout)
@@ -470,20 +434,16 @@ for idx, moment in enumerate(moments):
         print('Telegram parse error: ' + str(e))
 
     if not file_id:
-        print('Failed to get file_id, skipping Supabase save')
         continue
 
-    print('Generating YouTube metadata...')
     meta = gen_yt_metadata(moment_text, commentary)
     title = meta.get('title', 'Viral Short')
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
 
-    print('Generating thumbnails from video frames...')
+    print('Generating thumbnails...')
     thumbnails = gen_frame_thumbnails('video.mp4', start, duration, title, 'thumb_%d' % idx)
-    print('Generated ' + str(len(thumbnails)) + ' thumbnails')
 
-    print('Saving to Supabase (first, to get row_id)...')
     row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, '')
     print('Supabase row ID: ' + str(row_id))
 
@@ -530,7 +490,7 @@ for idx, moment in enumerate(moments):
             'https://api.telegram.org/bot' + BOT_TOKEN + '/sendPhoto',
             '-F', 'chat_id=' + CHAT_ID,
             '-F', 'photo=@' + thumb_path,
-            '-F', 'caption=🎨 Thumbnail ' + str(ti + 1) + ' - Short ' + str(idx + 1),
+            '-F', 'caption=🎨 Thumbnail ' + str(ti + 1),
             '-F', 'reply_markup=' + thumb_keyboard
         ], capture_output=True, text=True)
 
@@ -539,4 +499,31 @@ for idx, moment in enumerate(moments):
             if resp_json.get('ok'):
                 photo_list = resp_json['result']['photo']
                 thumb_file_id = photo_list[-1]['file_id']
-                thumbnail_file_id
+                thumbnail_file_ids.append(thumb_file_id)
+                print('Thumbnail %d File ID saved' % (ti + 1))
+        except Exception as e:
+            print('Thumbnail parse error: ' + str(e))
+
+    if thumbnail_file_ids:
+        thumb_ids_str = ','.join(thumbnail_file_ids)
+        url = SUPABASE_URL + '/rest/v1/pending_shorts?id=eq.' + str(row_id)
+        headers = {
+            'apikey': SUPABASE_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': 'application/json'
+        }
+        requests.patch(url, headers=headers, json={'thumbnail_urls': thumb_ids_str}, timeout=30)
+        print('Saved thumbnail file_ids to Supabase')
+
+    time.sleep(3)
+
+    try:
+        os.remove(tts_path)
+        os.remove(ass_path)
+        for tp in thumbnails:
+            if os.path.exists(tp):
+                os.remove(tp)
+    except:
+        pass
+
+print('\nAll shorts generated and sent for approval!')
