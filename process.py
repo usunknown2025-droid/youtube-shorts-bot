@@ -265,6 +265,24 @@ def ass_time(seconds):
     return '%d:%02d:%05.2f' % (hrs, mins, secs)
 
 
+def wrap_caption(text, max_chars=18):
+    words = text.split()
+    lines = []
+    current = ""
+    for w in words:
+        if len(current) + len(w) + 1 <= max_chars:
+            current = (current + " " + w).strip()
+        else:
+            if current:
+                lines.append(current)
+            current = w
+    if current:
+        lines.append(current)
+    if len(lines) > 2:
+        lines = lines[-2:]
+    return '\\N'.join(lines)
+
+
 def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
     if actual_tts_dur is None:
         actual_tts_dur = tts_dur
@@ -279,7 +297,7 @@ def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
     lines.append('[V4+ Styles]')
     lines.append('Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding')
     lines.append('Style: Commentary,Arial,35,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,5,30,30,0,1')
-    lines.append('Style: Caption,Arial,80,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,2,30,30,400,1')
+    lines.append('Style: Caption,Arial,80,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,2,30,30,270,1')
     lines.append('')
     lines.append('[Events]')
     lines.append('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text')
@@ -305,7 +323,8 @@ def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
                 s = seg.get('start', 0) + tts_dur
                 e = seg.get('end', 0) + tts_dur
                 if e > s:
-                    lines.append('Dialogue: 0,%s,%s,Caption,,0,0,0,,%s' % (ass_time(s), ass_time(e), seg_text))
+                    wrapped = wrap_caption(seg_text)
+                    lines.append('Dialogue: 0,%s,%s,Caption,,0,0,0,,%s' % (ass_time(s), ass_time(e), wrapped))
             continue
         growing = []
         for i, w in enumerate(seg_words):
@@ -317,7 +336,7 @@ def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
                 e = w['end'] + tts_dur
             if e <= s:
                 e = s + 0.3
-            text = ' '.join(growing)
+            text = wrap_caption(' '.join(growing))
             lines.append('Dialogue: 0,%s,%s,Caption,,0,0,0,,%s' % (ass_time(s), ass_time(e), text))
 
     return '\n'.join(lines)
