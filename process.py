@@ -15,14 +15,6 @@ print('DEBUG - BOT_TOKEN length: ' + str(len(BOT_TOKEN)))
 print('DEBUG - CHAT_ID: ' + CHAT_ID)
 
 
-def format_time(seconds):
-    hrs = int(seconds // 3600)
-    mins = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    ms = int((seconds - int(seconds)) * 1000)
-    return '%02d:%02d:%02d,%03d' % (hrs, mins, secs, ms)
-
-
 def contains_non_english(text):
     for ch in text:
         if ord(ch) > 0x0FFF:
@@ -244,46 +236,48 @@ def gen_yt_metadata(moment_text, commentary):
     }
 
 
-def gen_thumbnail_prompt(title, description, transcript):
-    prompt = 'Create a detailed IMAGE GENERATION prompt for a YouTube Shorts thumbnail.\n\n'
-    prompt += 'VIDEO TITLE: ' + title + '\n\n'
-    prompt += 'VIDEO DESCRIPTION: ' + description + '\n\n'
-    prompt += 'VIDEO TRANSCRIPT: ' + transcript[:500] + '\n\n'
-    prompt += 'RULES:\n'
-    prompt += '1. Describe the MAIN VISUAL moment in the video (person, action, object, setting)\n'
-    prompt += '2. Include colors, emotions, expressions that match the video\n'
-    prompt += '3. Make it eye-catching for YouTube Shorts\n'
-    prompt += '4. NO text overlay in the prompt - just the visual scene\n'
-    prompt += '5. Be SPECIFIC - if basketball, mention "player dunking"; if animal, name species\n'
-    prompt += '6. Keep under 200 characters\n\n'
-    prompt += 'Return ONLY the prompt text, nothing else.'
-    result = groq_call(prompt, max_tokens=200, temp=0.7)
-    if result:
-        t = result.strip()
-        t = re.sub(r'["\n\r]', ' ', t)
-        return t[:200]
-    return title
+# ---------- STEP 3.5: Thumbnail Generation (Style 1: Frame + Bold Text) ----------
+def gen_frame_thumbnails(video_path, moment_start, moment_duration, title, output_prefix):
+    """Extract 4 frames from video and add bold yellow text overlay"""
+    # Get short text (first 3-4 words, uppercase, no special chars)
+    text_words = title.split()[:4]
+    thumb_text = ' '.join(text_words).upper()
+    thumb_text = re.sub(r'[^A-Z0-9 ]', '', thumb_text)
+    if len(thumb_text) > 22:
+        thumb_text = thumb_text[:22].strip()
+    print('Thumbnail text: ' + thumb_text)
 
+    positions = [0.2, 0.45, 0.7, 0.9]
+    thumbnails = []
 
-def gen_thumbnails(title, description, transcript):
-    thumb_base = gen_thumbnail_prompt(title, description, transcript)
-    print('Thumbnail base prompt: ' + thumb_base)
-    
-    variations = [
-        'dramatic close-up shot',
-        'wide angle action shot',
-        'low angle heroic perspective',
-        'cinematic side view'
-    ]
-    
-    thumbnail_urls = []
-    for i in range(4):
-        full_prompt = thumb_base + ', ' + variations[i] + ', 9:16 vertical, YouTube Shorts thumbnail style, vibrant colors, high contrast, eye-catching, ultra detailed'
-        thumb_url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(full_prompt)}?width=720&height=1280&seed={i*137}&nologo=true"
-        thumbnail_urls.append(thumb_url)
-        print(f'Thumbnail {i+1}: {thumb_url}')
-    
-    return thumbnail_urls
+    font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+
+    for i, pos in enumerate(positions):
+        timestamp = moment_start + (moment_duration * pos)
+        out_path = '%s_%d.jpg' % (output_prefix, i)
+
+        vf = (
+            "scale=720:1280:force_original_aspect_ratio=increase,"
+            "crop=720:1280,"
+            "drawtext=text='" + thumb_text + "':"
+            "fontcolor=Yellow:fontsize=76:"
+            "borderw=6:bordercolor=Black:"
+            "x=(w-text_w)/2:y=h*0.08:"
+            "fontfile=" + font_path
+        )
+
+        subprocess.run([
+            'ffmpeg', '-y', '-ss', str(timestamp), '-i', video_path,
+            '-vframes', '1', '-vf', vf, '-q:v', '2', out_path
+        ], capture_output=True)
+
+        if os.path.exists(out_path):
+            thumbnails.append(out_path)
+            print('Thumbnail %d created: %s' % (i + 1, out_path))
+        else:
+            print('Thumbnail %d failed' % (i + 1))
+
+    return thumbnails
 
 
 # ---------- STEP 4: TTS ----------
@@ -456,7 +450,7 @@ for idx, moment in enumerate(moments):
         out_path
     ])
 
-    print('Sending to Telegram...')
+    print('Sending video to Telegram...')
     tg_response = subprocess.run([
         'curl', '-s', '-X', 'POST',
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
@@ -465,17 +459,14 @@ for idx, moment in enumerate(moments):
         '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
     ], capture_output=True, text=True)
 
-    print('DEBUG TG stdout: ' + tg_response.stdout[:500])
-    print('DEBUG TG stderr: ' + tg_response.stderr[:500])
+    print('DEBUG TG stdout: ' + tg_response.stdout[:300])
 
     file_id = None
     try:
         tg_json = json.loads(tg_response.stdout)
         if tg_json.get('ok'):
             file_id = tg_json['result']['video']['file_id']
-            print('File ID: ' + file_id)
-        else:
-            print('Telegram error: ' + str(tg_json)[:500])
+            print('Video File ID: ' + file_id)
     except Exception as e:
         print('Telegram parse error: ' + str(e))
 
@@ -489,66 +480,64 @@ for idx, moment in enumerate(moments):
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
 
-    print('Generating thumbnails...')
-    thumbnail_urls = gen_thumbnails(title, description, moment_text)
-    thumb_urls_str = ','.join(thumbnail_urls)
-    print('Generated ' + str(len(thumbnail_urls)) + ' thumbnails')
+    print('Generating thumbnails from video frames...')
+    thumbnails = gen_frame_thumbnails('video.mp4', start, duration, title, 'thumb_%d' % idx)
+    print('Generated ' + str(len(thumbnails)) + ' thumbnails')
 
-    print('Saving to Supabase...')
-    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, thumb_urls_str)
+    print('Saving to Supabase (first, to get row_id)...')
+    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, '')
     print('Supabase row ID: ' + str(row_id))
 
-    if row_id:
-        keyboard = json.dumps({
-            'inline_keyboard': [
-                [
-                    {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
-                    {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
-                ],
-                [
-                    {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
-                    {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
-                ]
+    if not row_id:
+        continue
+
+    # Send approval message
+    keyboard = json.dumps({
+        'inline_keyboard': [
+            [
+                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
+                {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
+            ],
+            [
+                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
+                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
             ]
+        ]
+    })
+
+    approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
+    approval_text += '📄 Title: ' + title + '\n\n'
+    approval_text += '📝 Description: ' + description + '\n\n'
+    approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
+    approval_text += 'Kya karna hai?'
+
+    subprocess.run([
+        'curl', '-s', '-X', 'POST',
+        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
+        '-d', 'chat_id=' + CHAT_ID,
+        '-d', 'text=' + approval_text,
+        '-d', 'parse_mode=Markdown',
+        '-d', 'reply_markup=' + keyboard
+    ])
+
+    # Send thumbnails and collect file_ids
+    thumbnail_file_ids = []
+    for ti, thumb_path in enumerate(thumbnails):
+        thumb_keyboard = json.dumps({
+            'inline_keyboard': [[
+                {'text': '✅ Ye Thumbnail Select Karo', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
+            ]]
         })
-
-        approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
-        approval_text += '📄 Title: ' + title + '\n\n'
-        approval_text += '📝 Description: ' + description + '\n\n'
-        approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
-        approval_text += 'Kya karna hai?'
-
-        subprocess.run([
+        thumb_resp = subprocess.run([
             'curl', '-s', '-X', 'POST',
-            'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
-            '-d', 'chat_id=' + CHAT_ID,
-            '-d', 'text=' + approval_text,
-            '-d', 'parse_mode=Markdown',
-            '-d', 'reply_markup=' + keyboard
-        ])
+            'https://api.telegram.org/bot' + BOT_TOKEN + '/sendPhoto',
+            '-F', 'chat_id=' + CHAT_ID,
+            '-F', 'photo=@' + thumb_path,
+            '-F', 'caption=🎨 Thumbnail ' + str(ti + 1) + ' - Short ' + str(idx + 1),
+            '-F', 'reply_markup=' + thumb_keyboard
+        ], capture_output=True, text=True)
 
-        # Send thumbnails with select buttons
-        for ti, thumb_url in enumerate(thumbnail_urls):
-            thumb_keyboard = json.dumps({
-                'inline_keyboard': [[
-                    {'text': '✅ Ye Thumbnail Select Karo', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
-                ]]
-            })
-            subprocess.run([
-                'curl', '-s', '-X', 'POST',
-                'https://api.telegram.org/bot' + BOT_TOKEN + '/sendPhoto',
-                '-d', 'chat_id=' + CHAT_ID,
-                '-d', 'photo=' + thumb_url,
-                '-d', 'caption=🎨 Thumbnail ' + str(ti + 1) + ' - Short ' + str(idx + 1),
-                '-d', 'reply_markup=' + thumb_keyboard
-            ])
-
-    time.sleep(5)
-
-    try:
-        os.remove(tts_path)
-        os.remove(ass_path)
-    except:
-        pass
-
-print('\nAll shorts generated and sent for approval!')
+        try:
+            resp_json = json.loads(thumb_resp.stdout)
+            if resp_json.get('ok'):
+ 
