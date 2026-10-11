@@ -531,4 +531,24 @@ for idx, moment in enumerate(moments):
         for ti, thumb_url in enumerate(thumbnail_urls):
             thumb_keyboard = json.dumps({
                 'inline_keyboard': [[
- 
+                    {'text': '✅ Ye Thumbnail Select Karo', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
+                ]]
+            })
+            subprocess.run([
+                'curl', '-s', '-X', 'POST',
+                'https://api.telegram.org/bot' + BOT_TOKEN + '/sendPhoto',
+                '-d', 'chat_id=' + CHAT_ID,
+                '-d', 'photo=' + thumb_url,
+                '-d', 'caption=🎨 Thumbnail ' + str(ti + 1) + ' - Short ' + str(idx + 1),
+                '-d', 'reply_markup=' + thumb_keyboard
+            ])
+
+    time.sleep(5)
+
+    try:
+        os.remove(tts_path)
+        os.remove(ass_path)
+    except:
+        pass
+
+print('\nAll shorts generated and sent for approval!')
