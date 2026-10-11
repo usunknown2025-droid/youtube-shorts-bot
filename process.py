@@ -70,7 +70,7 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
     return None
 
 
-def save_to_supabase(chat_id, file_id, title, description, tags, short_number):
+def save_to_supabase(chat_id, file_id, title, description, tags, short_number, thumbnail_urls=''):
     url = SUPABASE_URL + '/rest/v1/pending_shorts'
     headers = {
         'apikey': SUPABASE_KEY,
@@ -86,7 +86,8 @@ def save_to_supabase(chat_id, file_id, title, description, tags, short_number):
         'tags': tags,
         'status': 'pending',
         'short_number': short_number,
-        'upload_status': 'pending'
+        'upload_status': 'pending',
+        'thumbnail_urls': thumbnail_urls
     }
     try:
         r = requests.post(url, headers=headers, json=data, timeout=30)
@@ -241,6 +242,48 @@ def gen_yt_metadata(moment_text, commentary):
         'description': 'Watch this amazing viral moment! Subscribe for more.\n\n#Shorts #Viral #Trending',
         'tags': ['shorts', 'viral', 'trending', 'amazing', 'usa']
     }
+
+
+def gen_thumbnail_prompt(title, description, transcript):
+    prompt = 'Create a detailed IMAGE GENERATION prompt for a YouTube Shorts thumbnail.\n\n'
+    prompt += 'VIDEO TITLE: ' + title + '\n\n'
+    prompt += 'VIDEO DESCRIPTION: ' + description + '\n\n'
+    prompt += 'VIDEO TRANSCRIPT: ' + transcript[:500] + '\n\n'
+    prompt += 'RULES:\n'
+    prompt += '1. Describe the MAIN VISUAL moment in the video (person, action, object, setting)\n'
+    prompt += '2. Include colors, emotions, expressions that match the video\n'
+    prompt += '3. Make it eye-catching for YouTube Shorts\n'
+    prompt += '4. NO text overlay in the prompt - just the visual scene\n'
+    prompt += '5. Be SPECIFIC - if basketball, mention "player dunking"; if animal, name species\n'
+    prompt += '6. Keep under 200 characters\n\n'
+    prompt += 'Return ONLY the prompt text, nothing else.'
+    result = groq_call(prompt, max_tokens=200, temp=0.7)
+    if result:
+        t = result.strip()
+        t = re.sub(r'["\n\r]', ' ', t)
+        return t[:200]
+    return title
+
+
+def gen_thumbnails(title, description, transcript):
+    thumb_base = gen_thumbnail_prompt(title, description, transcript)
+    print('Thumbnail base prompt: ' + thumb_base)
+    
+    variations = [
+        'dramatic close-up shot',
+        'wide angle action shot',
+        'low angle heroic perspective',
+        'cinematic side view'
+    ]
+    
+    thumbnail_urls = []
+    for i in range(4):
+        full_prompt = thumb_base + ', ' + variations[i] + ', 9:16 vertical, YouTube Shorts thumbnail style, vibrant colors, high contrast, eye-catching, ultra detailed'
+        thumb_url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(full_prompt)}?width=720&height=1280&seed={i*137}&nologo=true"
+        thumbnail_urls.append(thumb_url)
+        print(f'Thumbnail {i+1}: {thumb_url}')
+    
+    return thumbnail_urls
 
 
 # ---------- STEP 4: TTS ----------
@@ -446,8 +489,13 @@ for idx, moment in enumerate(moments):
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
 
+    print('Generating thumbnails...')
+    thumbnail_urls = gen_thumbnails(title, description, moment_text)
+    thumb_urls_str = ','.join(thumbnail_urls)
+    print('Generated ' + str(len(thumbnail_urls)) + ' thumbnails')
+
     print('Saving to Supabase...')
-    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1)
+    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, thumb_urls_str)
     print('Supabase row ID: ' + str(row_id))
 
     if row_id:
@@ -479,12 +527,8 @@ for idx, moment in enumerate(moments):
             '-d', 'reply_markup=' + keyboard
         ])
 
-    time.sleep(5)
-
-    try:
-        os.remove(tts_path)
-        os.remove(ass_path)
-    except:
-        pass
-
-print('\nAll shorts generated and sent for approval!')
+        # Send thumbnails
+        for ti, thumb_url in enumerate(thumbnail_urls):
+            subprocess.run([
+                'curl', '-s', '-X', 'POST',
+                'https://api
