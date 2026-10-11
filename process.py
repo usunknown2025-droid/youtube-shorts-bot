@@ -265,7 +265,9 @@ def ass_time(seconds):
     return '%d:%02d:%05.2f' % (hrs, mins, secs)
 
 
-def build_combined_ass(commentary, tts_dur, moment_segs):
+def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
+    if actual_tts_dur is None:
+        actual_tts_dur = tts_dur
     lines = []
     lines.append('[Script Info]')
     lines.append('ScriptType: v4.00+')
@@ -284,7 +286,7 @@ def build_combined_ass(commentary, tts_dur, moment_segs):
 
     words = commentary.split()
     if words:
-        word_dur = tts_dur / float(len(words))
+        word_dur = actual_tts_dur / float(len(words))
         growing = []
         for i, w in enumerate(words):
             growing.append(w)
@@ -362,12 +364,13 @@ for idx, moment in enumerate(moments):
         subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
                         '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', tts_path])
 
-    tts_dur = get_audio_duration(tts_path) + 0.4
+    actual_tts_dur = get_audio_duration(tts_path)
+    tts_dur = actual_tts_dur + 0.4
     print('TTS duration: %0.2f seconds' % tts_dur)
 
     ass_path = 'subs_%d.ass' % idx
     with open(ass_path, 'w', encoding='utf-8') as f:
-        f.write(build_combined_ass(commentary, tts_dur, moment_segs))
+        f.write(build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur))
 
     out_path = 'shorts_%d.mp4' % idx
 
