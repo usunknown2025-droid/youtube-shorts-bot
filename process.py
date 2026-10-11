@@ -44,7 +44,7 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
     url = 'https://api.groq.com/openai/v1/chat/completions'
     headers = {'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json'}
     payload = {
-        'model': 'llama-3.3-70b-versatile',
+        'model': 'openai/gpt-oss-120b',
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': temp,
         'max_tokens': max_tokens
@@ -53,15 +53,15 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
         payload['response_format'] = {'type': 'json_object'}
     for attempt in range(3):
         try:
-            r = requests.post(url, headers=headers, json=payload, timeout=60)
+            r = requests.post(url, headers=headers, json=payload, timeout=90)
             result = r.json()
             if 'choices' in result:
                 return result['choices'][0]['message']['content']
             else:
                 print('Groq response: ' + str(result)[:300])
                 if 'rate limit' in str(result).lower() or 'rate_limit' in str(result).lower():
-                    print('Rate limit hit, waiting 30 seconds...')
-                    time.sleep(30)
+                    print('Rate limit hit, waiting 60 seconds...')
+                    time.sleep(60)
                 else:
                     time.sleep(5)
         except Exception as e:
@@ -127,21 +127,16 @@ max_possible = int(video_total_duration // DURATION)
 print('Max possible non-overlapping moments: ' + str(max_possible))
 target_moments = min(NUM_SHORTS, max_possible)
 
-prompt = 'You are analyzing a YouTube video transcript. Find viral moments.\n\n'
-prompt += 'REQUIREMENTS:\n'
-prompt += '- Find exactly ' + str(target_moments) + ' moments\n'
-prompt += '- Each moment ~' + str(DURATION) + ' seconds\n'
-prompt += '- Must NOT overlap\n'
-prompt += '- Spread across whole video\n\n'
-prompt += 'Return STRICT JSON in this EXACT format:\n'
-prompt += '{"moments": [{"start": 12.5, "end": 57.5, "reason": "text"}]}\n\n'
-prompt += 'IMPORTANT: Return ONLY the JSON object. No markdown, no explanation, no extra text.\n'
-prompt += 'Start response with { and end with }.\n\n'
-prompt += 'FULL TRANSCRIPT:\n'
-for s in seg_data:
-    prompt += '%0.1f-%0.1f: %s\n' % (s['start'], s['end'], s['text'])
+combined_text = ' '.join([s['text'] for s in seg_data])
+if len(combined_text) > 4000:
+    combined_text = combined_text[:4000] + '...'
 
-result = groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=True)
+prompt = 'Find ' + str(target_moments) + ' viral moments (~' + str(DURATION) + 's each, no overlap) from this transcript.\n\n'
+prompt += 'Return ONLY valid JSON, no markdown:\n'
+prompt += '{"moments": [{"start": 12.5, "end": 57.5, "reason": "why viral"}]}\n\n'
+prompt += 'TRANSCRIPT:\n' + combined_text
+
+result = groq_call(prompt, max_tokens=1500, temp=0.3, json_mode=True)
 
 all_moments = []
 if result:
@@ -207,44 +202,29 @@ print('Final: Got ' + str(len(moments)) + ' moments (requested: ' + str(NUM_SHOR
 
 # ---------- STEP 3: Commentary ----------
 def gen_commentary(moment_text):
-    prompt = 'Write a short, engaging ENGLISH commentary (max 40 words) for this video segment.\n'
-    prompt += 'PURE ENGLISH only. No Hindi, no other scripts.\n'
-    prompt += 'Describe the SPECIFIC action or event happening in the video.\n'
-    prompt += 'Just the commentary, no labels.\n\n'
-    prompt += 'Segment: ' + moment_text[:1000]
+    prompt = 'Write short ENGLISH commentary (max 40 words). PURE ENGLISH only. Describe the SPECIFIC action happening.\n\n'
+    prompt += 'Segment: ' + moment_text[:800]
     for attempt in range(3):
         result = groq_call(prompt, max_tokens=150, temp=0.7)
         if result:
             t = result.strip()
             if not contains_non_english(t):
                 return t
-        time.sleep(5)
+        time.sleep(10)
     return 'Check out this amazing moment!'
 
 
 def gen_yt_metadata(moment_text, commentary):
-    prompt = 'You are a YouTube Shorts metadata generator. Analyze the ACTUAL video content and describe what really happens in it.\n\n'
-    prompt += 'VIDEO TRANSCRIPT (what is shown/happening in the video):\n'
-    prompt += moment_text[:1500] + '\n\n'
-    prompt += 'NARRATION COMMENTARY (added voiceover):\n'
-    prompt += commentary[:500] + '\n\n'
-    prompt += 'CRITICAL RULES:\n'
-    prompt += '1. TITLE must mention the SPECIFIC event/action/object in the video. NOT generic words like "Amazing", "Incredible", "Viral" unless combined with specific event.\n'
-    prompt += '   BAD: "Amazing Moment Caught on Camera"\n'
-    prompt += '   GOOD: "Skateboarder Lands Impossible 360 Flip 🔥"\n'
-    prompt += '   BAD: "Unbelievable Video You Must See"\n'
-    prompt += '   GOOD: "Cheetah Chases Gazelle at Full Speed 🐆"\n'
-    prompt += '2. If the video shows DANGER/RISK, mention it specifically (what danger, what action).\n'
-    prompt += '3. If the video is FUNNY, describe what is funny.\n'
-    prompt += '4. If the video is a SPORT/SKILL, name the sport and the specific move/trick.\n'
-    prompt += '5. DESCRIPTION must describe what actually happens in 2-3 lines (not generic filler).\n'
-    prompt += '6. TAGS must be specific to the content (sport name, animal, action type, objects seen) - not just "viral, trending, shorts".\n\n'
-    prompt += 'Return JSON with keys:\n'
-    prompt += '- "title": specific title describing the actual event (max 90 chars, English, 1-2 emojis)\n'
-    prompt += '- "description": 2-3 line English description of what actually happens + 3-5 hashtags\n'
-    prompt += '- "tags": array of 12-15 English tags including content-specific ones\n\n'
-    prompt += 'JSON only. Start with { and end with }.'
-    result = groq_call(prompt, max_tokens=600, temp=0.5, json_mode=True)
+    prompt = 'Generate YouTube Shorts metadata for this actual video content.\n\n'
+    prompt += 'TRANSCRIPT: ' + moment_text[:800] + '\n\n'
+    prompt += 'COMMENTARY: ' + commentary[:300] + '\n\n'
+    prompt += 'RULES:\n'
+    prompt += '1. Title must mention the SPECIFIC event (not generic "Amazing/Viral/Incredible" alone)\n'
+    prompt += '2. Description must describe what actually happens (2-3 lines)\n'
+    prompt += '3. Tags must include content-specific ones (sport name, animal, action)\n\n'
+    prompt += 'Return ONLY JSON (no markdown):\n'
+    prompt += '{"title": "...", "description": "...", "tags": ["tag1", "tag2"]}'
+    result = groq_call(prompt, max_tokens=500, temp=0.5, json_mode=True)
     if result:
         try:
             clean = result.strip()
