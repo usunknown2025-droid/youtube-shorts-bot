@@ -11,6 +11,9 @@ NUM_SHORTS = int(os.environ.get('NUM_SHORTS', '3'))
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
 
+print('DEBUG - BOT_TOKEN length: ' + str(len(BOT_TOKEN)))
+print('DEBUG - CHAT_ID: ' + CHAT_ID)
+
 
 def format_time(seconds):
     hrs = int(seconds // 3600)
@@ -41,7 +44,7 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
     url = 'https://api.groq.com/openai/v1/chat/completions'
     headers = {'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json'}
     payload = {
-        'model': 'openai/gpt-oss-20b',
+        'model': 'llama-3.3-70b-versatile',
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': temp,
         'max_tokens': max_tokens
@@ -56,9 +59,14 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
                 return result['choices'][0]['message']['content']
             else:
                 print('Groq response: ' + str(result)[:300])
+                if 'rate limit' in str(result).lower() or 'rate_limit' in str(result).lower():
+                    print('Rate limit hit, waiting 30 seconds...')
+                    time.sleep(30)
+                else:
+                    time.sleep(5)
         except Exception as e:
             print('Groq error: ' + str(e))
-            time.sleep(5)
+            time.sleep(10)
     return None
 
 
@@ -119,26 +127,32 @@ max_possible = int(video_total_duration // DURATION)
 print('Max possible non-overlapping moments: ' + str(max_possible))
 target_moments = min(NUM_SHORTS, max_possible)
 
-prompt = 'You are analyzing a YouTube video transcript. Your job is to find viral moments.\n\n'
+prompt = 'You are analyzing a YouTube video transcript. Find viral moments.\n\n'
 prompt += 'REQUIREMENTS:\n'
 prompt += '- Find exactly ' + str(target_moments) + ' moments\n'
-prompt += '- Each moment should be approximately ' + str(DURATION) + ' seconds long\n'
-prompt += '- Moments MUST NOT overlap with each other\n'
-prompt += '- Spread them across the whole video, not clustered together\n\n'
-prompt += 'OUTPUT FORMAT (strict JSON):\n'
-prompt += '{"moments": [{"start": 12.5, "end": 57.5, "reason": "interesting moment"}]}\n\n'
-prompt += 'IMPORTANT: Return exactly ' + str(target_moments) + ' moments in the array.\n'
-prompt += 'Do NOT return empty array. If unsure, pick evenly distributed timestamps.\n\n'
+prompt += '- Each moment ~' + str(DURATION) + ' seconds\n'
+prompt += '- Must NOT overlap\n'
+prompt += '- Spread across whole video\n\n'
+prompt += 'Return STRICT JSON in this EXACT format:\n'
+prompt += '{"moments": [{"start": 12.5, "end": 57.5, "reason": "text"}]}\n\n'
+prompt += 'IMPORTANT: Return ONLY the JSON object. No markdown, no explanation, no extra text.\n'
+prompt += 'Start response with { and end with }.\n\n'
 prompt += 'FULL TRANSCRIPT:\n'
 for s in seg_data:
     prompt += '%0.1f-%0.1f: %s\n' % (s['start'], s['end'], s['text'])
 
-result = groq_call(prompt, max_tokens=2500, temp=0.3, json_mode=True)
+result = groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=True)
 
 all_moments = []
 if result:
     try:
-        data = json.loads(result)
+        clean = result.strip()
+        if clean.startswith('```'):
+            clean = clean.split('```')[1]
+            if clean.startswith('json'):
+                clean = clean[4:]
+        clean = clean.strip()
+        data = json.loads(clean)
         all_moments = data.get('moments', [])
         print('Groq returned ' + str(len(all_moments)) + ' moments')
     except Exception as e:
@@ -204,6 +218,7 @@ def gen_commentary(moment_text):
             t = result.strip()
             if not contains_non_english(t):
                 return t
+        time.sleep(5)
     return 'Check out this amazing moment!'
 
 
@@ -228,11 +243,17 @@ def gen_yt_metadata(moment_text, commentary):
     prompt += '- "title": specific title describing the actual event (max 90 chars, English, 1-2 emojis)\n'
     prompt += '- "description": 2-3 line English description of what actually happens + 3-5 hashtags\n'
     prompt += '- "tags": array of 12-15 English tags including content-specific ones\n\n'
-    prompt += 'JSON only.'
+    prompt += 'JSON only. Start with { and end with }.'
     result = groq_call(prompt, max_tokens=600, temp=0.5, json_mode=True)
     if result:
         try:
-            return json.loads(result)
+            clean = result.strip()
+            if clean.startswith('```'):
+                clean = clean.split('```')[1]
+                if clean.startswith('json'):
+                    clean = clean[4:]
+            clean = clean.strip()
+            return json.loads(clean)
         except Exception as e:
             print('Metadata parse error: ' + str(e))
     return {
@@ -256,7 +277,7 @@ def gen_tts(text, path):
     return False
 
 
-# ---------- STEP 5: Combined ASS (commentary middle + captions bottom) ----------
+# ---------- STEP 5: Combined ASS ----------
 def ass_time(seconds):
     hrs = int(seconds // 3600)
     mins = int((seconds % 3600) // 60)
@@ -399,12 +420,17 @@ for idx, moment in enumerate(moments):
         '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
     ], capture_output=True, text=True)
 
+    print('DEBUG TG stdout: ' + tg_response.stdout[:500])
+    print('DEBUG TG stderr: ' + tg_response.stderr[:500])
+
     file_id = None
     try:
         tg_json = json.loads(tg_response.stdout)
         if tg_json.get('ok'):
             file_id = tg_json['result']['video']['file_id']
             print('File ID: ' + file_id)
+        else:
+            print('Telegram error: ' + str(tg_json)[:500])
     except Exception as e:
         print('Telegram parse error: ' + str(e))
 
@@ -423,7 +449,6 @@ for idx, moment in enumerate(moments):
     print('Supabase row ID: ' + str(row_id))
 
     if row_id:
-        # 4 buttons in 2 rows
         keyboard = json.dumps({
             'inline_keyboard': [
                 [
@@ -451,7 +476,7 @@ for idx, moment in enumerate(moments):
             '-d', 'reply_markup=' + keyboard
         ])
 
-    time.sleep(3)
+    time.sleep(5)
 
     try:
         os.remove(tts_path)
