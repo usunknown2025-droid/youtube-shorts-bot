@@ -195,6 +195,7 @@ print('Final: Got ' + str(len(moments)) + ' moments (requested: ' + str(NUM_SHOR
 def gen_commentary(moment_text):
     prompt = 'Write a short, engaging ENGLISH commentary (max 40 words) for this video segment.\n'
     prompt += 'PURE ENGLISH only. No Hindi, no other scripts.\n'
+    prompt += 'Describe the SPECIFIC action or event happening in the video.\n'
     prompt += 'Just the commentary, no labels.\n\n'
     prompt += 'Segment: ' + moment_text[:1000]
     for attempt in range(3):
@@ -206,15 +207,29 @@ def gen_commentary(moment_text):
     return 'Check out this amazing moment!'
 
 
-def gen_yt_metadata(commentary):
-    prompt = 'You are a YouTube Shorts SEO expert. Generate metadata for this Short.\n\n'
-    prompt += 'Context: ' + commentary[:500] + '\n\n'
+def gen_yt_metadata(moment_text, commentary):
+    prompt = 'You are a YouTube Shorts metadata generator. Analyze the ACTUAL video content and describe what really happens in it.\n\n'
+    prompt += 'VIDEO TRANSCRIPT (what is shown/happening in the video):\n'
+    prompt += moment_text[:1500] + '\n\n'
+    prompt += 'NARRATION COMMENTARY (added voiceover):\n'
+    prompt += commentary[:500] + '\n\n'
+    prompt += 'CRITICAL RULES:\n'
+    prompt += '1. TITLE must mention the SPECIFIC event/action/object in the video. NOT generic words like "Amazing", "Incredible", "Viral" unless combined with specific event.\n'
+    prompt += '   BAD: "Amazing Moment Caught on Camera"\n'
+    prompt += '   GOOD: "Skateboarder Lands Impossible 360 Flip 🔥"\n'
+    prompt += '   BAD: "Unbelievable Video You Must See"\n'
+    prompt += '   GOOD: "Cheetah Chases Gazelle at Full Speed 🐆"\n'
+    prompt += '2. If the video shows DANGER/RISK, mention it specifically (what danger, what action).\n'
+    prompt += '3. If the video is FUNNY, describe what is funny.\n'
+    prompt += '4. If the video is a SPORT/SKILL, name the sport and the specific move/trick.\n'
+    prompt += '5. DESCRIPTION must describe what actually happens in 2-3 lines (not generic filler).\n'
+    prompt += '6. TAGS must be specific to the content (sport name, animal, action type, objects seen) - not just "viral, trending, shorts".\n\n'
     prompt += 'Return JSON with keys:\n'
-    prompt += '- "title": catchy Shorts title (max 90 chars, English, 1-2 emojis)\n'
-    prompt += '- "description": 2-3 line English description with hashtags\n'
-    prompt += '- "tags": array of 10-15 English tags\n\n'
+    prompt += '- "title": specific title describing the actual event (max 90 chars, English, 1-2 emojis)\n'
+    prompt += '- "description": 2-3 line English description of what actually happens + 3-5 hashtags\n'
+    prompt += '- "tags": array of 12-15 English tags including content-specific ones\n\n'
     prompt += 'JSON only.'
-    result = groq_call(prompt, max_tokens=500, temp=0.7, json_mode=True)
+    result = groq_call(prompt, max_tokens=600, temp=0.5, json_mode=True)
     if result:
         try:
             return json.loads(result)
@@ -398,7 +413,7 @@ for idx, moment in enumerate(moments):
         continue
 
     print('Generating YouTube metadata...')
-    meta = gen_yt_metadata(commentary)
+    meta = gen_yt_metadata(moment_text, commentary)
     title = meta.get('title', 'Viral Short')
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
