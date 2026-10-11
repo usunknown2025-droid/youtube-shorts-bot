@@ -236,10 +236,9 @@ def gen_yt_metadata(moment_text, commentary):
     }
 
 
-# ---------- STEP 3.5: Thumbnail Generation (Style 1: Frame + Bold Text) ----------
+# ---------- STEP 3.5: Thumbnail Generation (Frame + Bold Text) ----------
 def gen_frame_thumbnails(video_path, moment_start, moment_duration, title, output_prefix):
     """Extract 4 frames from video and add bold yellow text overlay"""
-    # Get short text (first 3-4 words, uppercase, no special chars)
     text_words = title.split()[:4]
     thumb_text = ' '.join(text_words).upper()
     thumb_text = re.sub(r'[^A-Z0-9 ]', '', thumb_text)
@@ -491,7 +490,6 @@ for idx, moment in enumerate(moments):
     if not row_id:
         continue
 
-    # Send approval message
     keyboard = json.dumps({
         'inline_keyboard': [
             [
@@ -520,7 +518,6 @@ for idx, moment in enumerate(moments):
         '-d', 'reply_markup=' + keyboard
     ])
 
-    # Send thumbnails and collect file_ids
     thumbnail_file_ids = []
     for ti, thumb_path in enumerate(thumbnails):
         thumb_keyboard = json.dumps({
@@ -540,4 +537,6 @@ for idx, moment in enumerate(moments):
         try:
             resp_json = json.loads(thumb_resp.stdout)
             if resp_json.get('ok'):
- 
+                photo_list = resp_json['result']['photo']
+                thumb_file_id = photo_list[-1]['file_id']
+                thumbnail_file_id
