@@ -102,6 +102,38 @@ def upload_to_youtube(video_path, title, description, tags):
     return None
 
 
+def set_youtube_thumbnail(video_id, thumbnail_url):
+    access_token = get_youtube_access_token()
+    if not access_token:
+        return False
+
+    # Download thumbnail image
+    print('Downloading thumbnail from: ' + thumbnail_url)
+    try:
+        thumb_response = requests.get(thumbnail_url, timeout=60)
+        if thumb_response.status_code != 200:
+            print('Failed to download thumbnail: ' + str(thumb_response.status_code))
+            return False
+        thumb_data = thumb_response.content
+        print('Thumbnail downloaded. Size: ' + str(len(thumb_data)) + ' bytes')
+    except Exception as e:
+        print('Thumbnail download error: ' + str(e))
+        return False
+
+    # Upload thumbnail to YouTube
+    url = 'https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=' + video_id
+    headers = {'Authorization': 'Bearer ' + access_token}
+    files = {'thumbnail': ('thumbnail.jpg', thumb_data, 'image/jpeg')}
+
+    r = requests.post(url, headers=headers, files=files, timeout=120)
+    if r.status_code == 200:
+        print('Thumbnail set successfully!')
+        return True
+    else:
+        print('Thumbnail set error: ' + str(r.status_code) + ' ' + r.text[:300])
+        return False
+
+
 def send_message(text):
     requests.post(
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
@@ -125,9 +157,14 @@ description = CUSTOM_DESCRIPTION if CUSTOM_DESCRIPTION else row.get('description
 tags_str = CUSTOM_TAGS if CUSTOM_TAGS else row.get('tags', '')
 tags = [t.strip() for t in tags_str.split(',') if t.strip()]
 
+# Get selected thumbnail info
+selected_thumb_index = row.get('selected_thumbnail', '')
+thumbnail_urls_str = row.get('thumbnail_urls', '')
+
 print('Title: ' + title)
 print('Description: ' + description[:100])
 print('Tags: ' + str(tags[:5]))
+print('Selected thumbnail index: ' + str(selected_thumb_index))
 
 # Download video from Telegram
 print('Downloading video from Telegram...')
@@ -145,7 +182,26 @@ yt_id = upload_to_youtube(video_path, title, description, tags)
 if yt_id:
     print('Success: https://youtu.be/' + yt_id)
     update_status(ROW_ID, 'uploaded')
-    send_message('✅ YouTube par upload ho gaya!\n\nTitle: ' + title + '\nLink: https://youtu.be/' + yt_id)
+
+    # Set thumbnail if user selected one
+    thumbnail_set_msg = ''
+    if selected_thumb_index != '' and thumbnail_urls_str:
+        try:
+            thumb_index_int = int(selected_thumb_index)
+            thumb_urls = [u.strip() for u in thumbnail_urls_str.split(',') if u.strip()]
+            if 0 <= thumb_index_int < len(thumb_urls):
+                selected_url = thumb_urls[thumb_index_int]
+                print('Setting thumbnail ' + str(thumb_index_int + 1) + ': ' + selected_url)
+                if set_youtube_thumbnail(yt_id, selected_url):
+                    thumbnail_set_msg = '\n🎨 Custom thumbnail set!'
+                else:
+                    thumbnail_set_msg = '\n⚠️ Thumbnail set nahi ho paya.'
+            else:
+                print('Thumbnail index out of range: ' + str(thumb_index_int))
+        except Exception as e:
+            print('Thumbnail error: ' + str(e))
+
+    send_message('✅ YouTube par upload ho gaya!\n\nTitle: ' + title + '\nLink: https://youtu.be/' + yt_id + thumbnail_set_msg)
 else:
     print('Upload failed')
     update_status(ROW_ID, 'failed')
