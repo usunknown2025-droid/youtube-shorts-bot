@@ -102,30 +102,18 @@ def upload_to_youtube(video_path, title, description, tags):
     return None
 
 
-def set_youtube_thumbnail(video_id, thumbnail_url):
+def set_youtube_thumbnail(video_id, thumbnail_path):
     access_token = get_youtube_access_token()
     if not access_token:
         return False
 
-    # Download thumbnail image
-    print('Downloading thumbnail from: ' + thumbnail_url)
-    try:
-        thumb_response = requests.get(thumbnail_url, timeout=60)
-        if thumb_response.status_code != 200:
-            print('Failed to download thumbnail: ' + str(thumb_response.status_code))
-            return False
-        thumb_data = thumb_response.content
-        print('Thumbnail downloaded. Size: ' + str(len(thumb_data)) + ' bytes')
-    except Exception as e:
-        print('Thumbnail download error: ' + str(e))
-        return False
-
-    # Upload thumbnail to YouTube
     url = 'https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=' + video_id
     headers = {'Authorization': 'Bearer ' + access_token}
-    files = {'thumbnail': ('thumbnail.jpg', thumb_data, 'image/jpeg')}
 
-    r = requests.post(url, headers=headers, files=files, timeout=120)
+    with open(thumbnail_path, 'rb') as f:
+        files = {'thumbnail': ('thumbnail.jpg', f, 'image/jpeg')}
+        r = requests.post(url, headers=headers, files=files, timeout=120)
+
     if r.status_code == 200:
         print('Thumbnail set successfully!')
         return True
@@ -159,7 +147,7 @@ tags = [t.strip() for t in tags_str.split(',') if t.strip()]
 
 # Get selected thumbnail info
 selected_thumb_index = row.get('selected_thumbnail', '')
-thumbnail_urls_str = row.get('thumbnail_urls', '')
+thumbnail_ids_str = row.get('thumbnail_urls', '')
 
 print('Title: ' + title)
 print('Description: ' + description[:100])
@@ -185,17 +173,22 @@ if yt_id:
 
     # Set thumbnail if user selected one
     thumbnail_set_msg = ''
-    if selected_thumb_index != '' and thumbnail_urls_str:
+    if selected_thumb_index != '' and thumbnail_ids_str:
         try:
             thumb_index_int = int(selected_thumb_index)
-            thumb_urls = [u.strip() for u in thumbnail_urls_str.split(',') if u.strip()]
-            if 0 <= thumb_index_int < len(thumb_urls):
-                selected_url = thumb_urls[thumb_index_int]
-                print('Setting thumbnail ' + str(thumb_index_int + 1) + ': ' + selected_url)
-                if set_youtube_thumbnail(yt_id, selected_url):
-                    thumbnail_set_msg = '\n🎨 Custom thumbnail set!'
+            thumb_ids = [t.strip() for t in thumbnail_ids_str.split(',') if t.strip()]
+            if 0 <= thumb_index_int < len(thumb_ids):
+                selected_thumb_file_id = thumb_ids[thumb_index_int]
+                print('Downloading selected thumbnail from Telegram...')
+                thumb_path = 'selected_thumbnail.jpg'
+                if download_from_telegram(selected_thumb_file_id, thumb_path):
+                    print('Setting thumbnail on YouTube...')
+                    if set_youtube_thumbnail(yt_id, thumb_path):
+                        thumbnail_set_msg = '\n🎨 Custom thumbnail set!'
+                    else:
+                        thumbnail_set_msg = '\n⚠️ Thumbnail set nahi ho paya.'
                 else:
-                    thumbnail_set_msg = '\n⚠️ Thumbnail set nahi ho paya.'
+                    thumbnail_set_msg = '\n⚠️ Thumbnail download nahi hua.'
             else:
                 print('Thumbnail index out of range: ' + str(thumb_index_int))
         except Exception as e:
