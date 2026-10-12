@@ -225,7 +225,7 @@ def gen_yt_metadata(moment_text, commentary):
         except Exception as e:
             print('Metadata parse error: ' + str(e))
     return {
-        'title': 'Viral Moment You Must See! 🔥',
+        'title': 'Viral Moment You Must See!',
         'description': 'Watch this amazing viral moment!\n\n#Shorts #Viral',
         'tags': ['shorts', 'viral', 'trending']
     }
@@ -471,20 +471,20 @@ for idx, moment in enumerate(moments):
     keyboard = json.dumps({
         'inline_keyboard': [
             [
-                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
-                {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
+                {'text': 'Upload', 'callback_data': 'approve_' + str(row_id)},
+                {'text': 'Schedule', 'callback_data': 'schedule_' + str(row_id)}
             ],
             [
-                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
-                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
+                {'text': 'Custom', 'callback_data': 'custom_' + str(row_id)},
+                {'text': 'Skip', 'callback_data': 'skip_' + str(row_id)}
             ]
         ]
     })
 
-    approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
-    approval_text += '📄 Title: ' + title + '\n\n'
-    approval_text += '📝 Description: ' + description + '\n\n'
-    approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
+    approval_text = 'Short ' + str(idx + 1) + '/' + str(len(moments)) + '\n\n'
+    approval_text += 'Title: ' + title + '\n\n'
+    approval_text += 'Description: ' + description + '\n\n'
+    approval_text += 'Tags: ' + tags[:150] + '...\n\n'
     approval_text += 'Kya karna hai?'
 
     subprocess.run([
@@ -492,7 +492,6 @@ for idx, moment in enumerate(moments):
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
         '-d', 'chat_id=' + CHAT_ID,
         '-d', 'text=' + approval_text,
-        '-d', 'parse_mode=Markdown',
         '-d', 'reply_markup=' + keyboard
     ])
 
@@ -504,7 +503,7 @@ for idx, moment in enumerate(moments):
     for ti, thumb_url in enumerate(thumbnail_urls):
         thumb_keyboard = json.dumps({
             'inline_keyboard': [[
-                {'text': '✅ Ye Thumbnail Select Karo', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
+                {'text': 'Ye Thumbnail Select Karo', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
             ]]
         })
         thumb_resp = subprocess.run([
@@ -512,7 +511,7 @@ for idx, moment in enumerate(moments):
             'https://api.telegram.org/bot' + BOT_TOKEN + '/sendPhoto',
             '-F', 'chat_id=' + CHAT_ID,
             '-F', 'photo=' + thumb_url,
-            '-F', 'caption=🎨 Thumbnail ' + str(ti + 1) + ' - Short ' + str(idx + 1),
+            '-F', 'caption=Thumbnail ' + str(ti + 1) + ' - Short ' + str(idx + 1),
             '-F', 'reply_markup=' + thumb_keyboard
         ], capture_output=True, text=True)
 
@@ -533,5 +532,5 @@ for idx, moment in enumerate(moments):
         update_thumbnail_ids(row_id, thumb_ids_str)
         print('Saved ' + str(len(thumbnail_file_ids)) + ' thumbnail file_ids')
 
-    # Send ChatGPT thumbnail prompt as backup
-    prompt_text = '🎨 *CHATGPT THUMBNAIL 
+    prompt_text = 'CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
+    prompt_text += 'Agar Pollinations thumbnails pasand nahi aayi, toh ye pro
