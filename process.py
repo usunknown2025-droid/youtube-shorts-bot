@@ -268,7 +268,7 @@ def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
     lines.append('')
     lines.append('[V4+ Styles]')
     lines.append('Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding')
-    lines.append('Style: Commentary,Arial,35,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,5,30,30,0,1')
+    lines.append('Style: Commentary,Arial,45,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,8,30,30,700,1')
     lines.append('Style: Caption,Arial,80,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,2,30,30,270,1')
     lines.append('')
     lines.append('[Events]')
@@ -284,7 +284,7 @@ def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
             e = (i + 1) * word_dur
             if e <= s:
                 e = s + 0.2
-            text = ' '.join(growing)
+            text = wrap_caption(' '.join(growing), 25)
             lines.append('Dialogue: 0,%s,%s,Commentary,,0,0,0,,%s' % (ass_time(s), ass_time(e), text))
 
     for seg in moment_segs:
@@ -312,6 +312,20 @@ def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
             lines.append('Dialogue: 0,%s,%s,Caption,,0,0,0,,%s' % (ass_time(s), ass_time(e), text))
 
     return '\n'.join(lines)
+
+
+def build_hook_text(title):
+    stop_words = ['the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'to', 'for', 'is', 'was', 'with', 'at', 'by']
+    words = title.split()
+    important_words = [w for w in words if w.lower() not in stop_words]
+    hook_words = important_words[:3]
+    hook_text = ' '.join(hook_words).upper()
+    hook_text = re.sub(r'[^A-Z0-9 !?]', '', hook_text)
+    if len(hook_text) > 25:
+        hook_text = hook_text[:25].strip()
+    if not hook_text:
+        hook_text = 'WATCH THIS'
+    return hook_text
 
 
 for idx, moment in enumerate(moments):
@@ -347,7 +361,6 @@ for idx, moment in enumerate(moments):
     moment_text = ' '.join([s['text'] for s in moment_segs])
     print('Moment text: ' + moment_text[:150])
 
-    # STEP A: Generate commentary + metadata FIRST
     commentary = gen_commentary(moment_text)
     commentary = re.sub(r'["\'\n\r]', ' ', commentary).strip()[:300]
     print('Commentary: ' + commentary)
@@ -359,7 +372,6 @@ for idx, moment in enumerate(moments):
     tags = ', '.join(meta.get('tags', []))
     print('Title: ' + title)
 
-    # STEP B: Generate TTS
     tts_path = 'tts_%d.mp3' % idx
     if not gen_tts(commentary, tts_path):
         subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
@@ -368,12 +380,10 @@ for idx, moment in enumerate(moments):
     actual_tts_dur = get_audio_duration(tts_path)
     tts_dur = actual_tts_dur + 0.4
 
-    # STEP C: Build ASS
     ass_path = 'subs_%d.ass' % idx
     with open(ass_path, 'w', encoding='utf-8') as f:
         f.write(build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur))
 
-    # STEP D: Extract hook frame
     print('Extracting hook frame...')
     hook_frame = 'hook_%d.jpg' % idx
     hook_offset = min(2.0, duration * 0.3)
@@ -384,26 +394,19 @@ for idx, moment in enumerate(moments):
         '-q:v', '2', hook_frame
     ], capture_output=True)
 
-    # STEP E: Hook text from title
-    hook_words = title.split()[:3]
-    hook_text = ' '.join(hook_words).upper()
-    hook_text = re.sub(r'[^A-Z0-9 !?]', '', hook_text)
-    if len(hook_text) > 20:
-        hook_text = hook_text[:20].strip()
-    if not hook_text:
-        hook_text = 'WATCH THIS'
+    hook_text = build_hook_text(title)
     print('Hook text: ' + hook_text)
 
     font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 
-    # STEP F: Render video
     print('Rendering video...')
     out_path = 'shorts_%d.mp4' % idx
     vf = ("[2:v]fps=30,scale=720:1280,setsar=1,"
           "drawtext=text='" + hook_text + "':"
-          "fontcolor=Yellow:fontsize=80:"
-          "borderw=8:bordercolor=Black:"
-          "x=(w-text_w)/2:y=(h-text_h)/2:"
+          "fontcolor=Yellow:fontsize=58:"
+          "borderw=6:bordercolor=Black:"
+          "box=1:boxcolor=Black@0.6:boxborderw=15:"
+          "x=(w-text_w)/2:y=h*0.12:"
           "fontfile=" + font_path + "[hookvid];"
           "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];"
           "[hookvid][v0]concat=n=2:v=1:a=0[vcat];"
@@ -428,7 +431,6 @@ for idx, moment in enumerate(moments):
     except:
         pass
 
-    # STEP G: Send to Telegram
     print('Sending video to Telegram...')
     tg_response = subprocess.run([
         'curl', '-s', '-X', 'POST',
@@ -451,7 +453,6 @@ for idx, moment in enumerate(moments):
         print('File ID not received, skipping')
         continue
 
-    # STEP H: Save to Supabase
     print('Saving to Supabase...')
     row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, '')
     print('Supabase row ID: ' + str(row_id))
@@ -459,7 +460,6 @@ for idx, moment in enumerate(moments):
     if not row_id:
         continue
 
-    # STEP I: Send approval buttons
     keyboard = json.dumps({
         'inline_keyboard': [
             [
@@ -487,7 +487,6 @@ for idx, moment in enumerate(moments):
         '-d', 'reply_markup=' + keyboard
     ])
 
-    # STEP J: Send ChatGPT prompt
     prompt_text = 'CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
     prompt_text += 'Copy this and paste in ChatGPT:\n\n'
     prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
