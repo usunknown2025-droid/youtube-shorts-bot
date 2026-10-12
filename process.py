@@ -195,31 +195,43 @@ def gen_commentary(moment_text):
 
 
 def gen_yt_metadata(moment_text, commentary):
-    prompt = 'Generate YouTube Shorts metadata for this video. This is for SEO - make it findable in search.\n\n'
-    prompt += 'TRANSCRIPT: ' + moment_text[:800] + '\n\n'
+    prompt = 'You are a YouTube Shorts SEO expert. Analyze the ACTUAL content and generate metadata.\n\n'
+    prompt += '=== VIDEO CONTENT ===\n'
+    prompt += 'TRANSCRIPT: ' + moment_text[:1500] + '\n\n'
     prompt += 'COMMENTARY: ' + commentary[:300] + '\n\n'
-    prompt += 'CRITICAL RULES:\n\n'
-    prompt += '1. TITLE:\n'
-    prompt += '   - Must include 2-3 HIGH-SEARCH KEYWORDS specific to the content\n'
-    prompt += '   - Example: "Kenya Water Well Project Complete"\n'
-    prompt += '   - NOT generic words like "Amazing", "Incredible" alone\n'
-    prompt += '   - MUST END WITH EXACTLY 4 HASHTAGS: #Shorts #Viral #MrBeast #Trending\n'
-    prompt += '   - Format: "[Specific Title] #Shorts #Viral #MrBeast #Trending"\n'
-    prompt += '   - Total length under 100 chars including hashtags\n\n'
-    prompt += '2. DESCRIPTION:\n'
-    prompt += '   - Line 1: Main keyword-rich sentence (SEO)\n'
-    prompt += '   - Line 2-3: 2-3 lines describing what happens\n'
-    prompt += '   - Then a blank line\n'
-    prompt += '   - MUST INCLUDE 15-20 HASHTAGS at the end\n'
-    prompt += '   - Include these: #MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing\n'
-    prompt += '   - Add 3-5 content-specific hashtags (e.g., #KenyaWater #CleanWater)\n\n'
-    prompt += '3. TAGS:\n'
-    prompt += '   - 12-15 specific tags (comma-separated in array)\n'
-    prompt += '   - Include: topic keywords, location, action words, category\n'
-    prompt += '   - Example: "kenya water well", "clean drinking water", "rural engineering"\n\n'
-    prompt += 'Return ONLY valid JSON:\n'
-    prompt += '{"title": "specific title #Shorts #Viral #MrBeast #Trending", "description": "line1\\nline2\\nline3\\n\\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing #ContentTag1 #ContentTag2", "tags": ["tag1", "tag2"]}'
-    result = groq_call(prompt, max_tokens=800, temp=0.4, json_mode=True)
+    prompt += '=== END CONTENT ===\n\n'
+    prompt += 'Now generate metadata based on WHAT ACTUALLY HAPPENS in the video.\n\n'
+    prompt += 'STRICT RULES:\n\n'
+    prompt += 'TITLE RULES:\n'
+    prompt += '- MUST describe the SPECIFIC action/event/object shown in the video\n'
+    prompt += '- Extract KEY SUBJECTS from the transcript (people, places, objects, actions)\n'
+    prompt += '- Do NOT use generic phrases like "Viral Moment", "Amazing Video", "Unbelievable", "Must See" ALONE\n'
+    prompt += '- GOOD EXAMPLES:\n'
+    prompt += '  * "Woman Finds $10,000 in Old Suitcase #Shorts #Viral #MrBeast #Trending"\n'
+    prompt += '  * "Cheetah Chases Gazelle at Full Speed #Shorts #Viral #MrBeast #Trending"\n'
+    prompt += '  * "Man Builds Water Well in Kenya #Shorts #Viral #MrBeast #Trending"\n'
+    prompt += '- BAD EXAMPLES (do not do this):\n'
+    prompt += '  * "Viral Moment You Must See"\n'
+    prompt += '  * "Amazing Video"\n'
+    prompt += '- MUST end with EXACTLY these 4 hashtags: #Shorts #Viral #MrBeast #Trending\n'
+    prompt += '- Total under 100 chars\n\n'
+    prompt += 'DESCRIPTION RULES:\n'
+    prompt += '- Line 1: Specific sentence describing what actually happens (SEO keyword-rich)\n'
+    prompt += '- Line 2-3: 1-2 more lines with details\n'
+    prompt += '- Then blank line\n'
+    prompt += '- Then 15-20 hashtags on separate lines\n'
+    prompt += '- MUST include these: #MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing\n'
+    prompt += '- PLUS 3-5 content-specific hashtags (e.g., #KenyaWater #CleanWater)\n\n'
+    prompt += 'TAGS RULES:\n'
+    prompt += '- MUST be 15 tags minimum (JSON array of strings)\n'
+    prompt += '- Each tag must be SPECIFIC to the content (nouns, actions, locations)\n'
+    prompt += '- Include: subject, action, location, category\n'
+    prompt += '- Example for basketball video: ["basketball", "clutch shot", "nba", "sports", "game winner", "last second", "amazing shot", "viral basketball", "shorts", "trending", "viral", "mrbeast", "sports highlights", "buzzer beater", "athlete"]\n'
+    prompt += '- Do NOT include just generic: "shorts", "viral", "trending" — must have content-specific ones\n\n'
+    prompt += 'Return ONLY valid JSON (no markdown):\n'
+    prompt += '{"title": "...", "description": "...", "tags": ["tag1", "tag2", "tag3", "...15 tags minimum..."]}'
+    
+    result = groq_call(prompt, max_tokens=1200, temp=0.5, json_mode=True)
     if result:
         try:
             clean = result.strip()
@@ -230,38 +242,47 @@ def gen_yt_metadata(moment_text, commentary):
             clean = clean.strip()
             parsed = json.loads(clean)
             
-            # Ensure 4 hashtags in title
             title = parsed.get('title', 'Viral Moment')
-            required_hashtags = ['#Shorts', '#Viral', '#MrBeast', '#Trending']
-            for ht in required_hashtags:
-                if ht.lower() not in title.lower():
-                    title += ' ' + ht
             
-            # Ensure description has at least 15 hashtags
+            required = ['#Shorts', '#Viral', '#MrBeast', '#Trending']
+            title_hashtags = re.findall(r'#\w+', title)
+            for ht in required:
+                if ht.lower() not in [t.lower() for t in title_hashtags]:
+                    title = title.rstrip() + ' ' + ht
+            
             desc = parsed.get('description', '')
             desc_hashtags = re.findall(r'#\w+', desc)
             if len(desc_hashtags) < 15:
-                base_hashtags = ['#MrBeast', '#Shorts', '#Viral', '#Trending', '#YouTubeShorts', 
-                                '#ViralClip', '#USA', '#MustWatch', '#Explore', '#ShortsFeed',
-                                '#FYP', '#ViralVideo', '#TrendingNow', '#ExploreMore', '#Amazing']
-                for bh in base_hashtags:
-                    if bh.lower() not in desc.lower():
-                        desc += ' ' + bh
+                base = ['#MrBeast', '#Shorts', '#Viral', '#Trending', '#YouTubeShorts',
+                        '#ViralClip', '#USA', '#MustWatch', '#Explore', '#ShortsFeed',
+                        '#FYP', '#ViralVideo', '#TrendingNow', '#ExploreMore', '#Amazing']
+                for bh in base:
+                    if bh.lower() not in [h.lower() for h in desc_hashtags]:
+                        desc += '\n' + bh
                         desc_hashtags.append(bh)
                         if len(desc_hashtags) >= 15:
                             break
             
+            tags = parsed.get('tags', [])
+            if len(tags) < 12:
+                base_tags = ['shorts', 'viral', 'trending', 'mrbeast', 'youtube shorts', 
+                             'viral clip', 'must watch', 'trending now', 'explore']
+                for bt in base_tags:
+                    if bt not in tags:
+                        tags.append(bt)
+            
             return {
                 'title': title,
                 'description': desc,
-                'tags': parsed.get('tags', [])
+                'tags': tags
             }
         except Exception as e:
             print('Metadata parse error: ' + str(e))
+    
     return {
         'title': 'Viral Moment You Must See! #Shorts #Viral #MrBeast #Trending',
         'description': 'Watch this amazing viral moment!\n\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing',
-        'tags': ['shorts', 'viral', 'trending', 'mrbeast']
+        'tags': ['shorts', 'viral', 'trending', 'mrbeast', 'youtube shorts', 'viral clip', 'must watch', 'trending now', 'explore', 'amazing', 'usa', 'fyp']
     }
 
 
@@ -470,111 +491,4 @@ for idx, moment in enumerate(moments):
     subprocess.run([
         'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
         '-i', 'video.mp4', '-i', tts_path,
-        '-loop', '1', '-t', str(tts_dur), '-i', hook_frame,
-        '-filter_complex', vf + ';' + af,
-        '-map', '[v]', '-map', '[aout]',
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
-        '-c:a', 'aac', '-b:a', '128k',
-        out_path
-    ])
-
-    try:
-        os.remove(hook_frame)
-    except:
-        pass
-
-    print('Sending video to Telegram...')
-    tg_response = subprocess.run([
-        'curl', '-s', '-X', 'POST',
-        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
-        '-F', 'chat_id=' + CHAT_ID,
-        '-F', 'video=@' + out_path,
-        '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
-    ], capture_output=True, text=True)
-
-    file_id = None
-    try:
-        tg_json = json.loads(tg_response.stdout)
-        if tg_json.get('ok'):
-            file_id = tg_json['result']['video']['file_id']
-            print('Video File ID: ' + file_id)
-    except Exception as e:
-        print('Telegram parse error: ' + str(e))
-
-    if not file_id:
-        print('File ID not received, skipping')
-        continue
-
-    print('Saving to Supabase...')
-    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, '')
-    print('Supabase row ID: ' + str(row_id))
-
-    if not row_id:
-        continue
-
-    keyboard = json.dumps({
-        'inline_keyboard': [
-            [
-                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
-                {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
-            ],
-            [
-                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
-                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
-            ]
-        ]
-    })
-
-    approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
-    approval_text += '📄 Title: ' + title + '\n\n'
-    approval_text += '📝 Description: ' + description[:300] + '...\n\n'
-    approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
-    approval_text += 'Kya karna hai?'
-
-    subprocess.run([
-        'curl', '-s', '-X', 'POST',
-        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
-        '-d', 'chat_id=' + CHAT_ID,
-        '-d', 'text=' + approval_text,
-        '-d', 'parse_mode=Markdown',
-        '-d', 'reply_markup=' + keyboard
-    ])
-
-    prompt_text = '🎨 CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
-    prompt_text += 'Copy this and paste in ChatGPT:\n\n'
-    prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
-    prompt_text += 'VIDEO TOPIC: ' + re.sub(r'#\w+', '', title).strip() + '\n\n'
-    prompt_text += 'RULES:\n'
-    prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
-    prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
-    prompt_text += '3. Large EMOJI in corner (shocked face, fire, money, lightning)\n'
-    prompt_text += '4. RED CIRCLE or RED ARROW pointing to key detail\n'
-    prompt_text += '5. HIGH CONTRAST, saturated vibrant colors\n'
-    prompt_text += '6. Text readable on mobile, max 4 words\n'
-    prompt_text += '7. Format: 9:16 vertical (720x1280)\n\n'
-    prompt_text += 'GENERATE THESE 6 STYLES:\n\n'
-    prompt_text += 'STYLE 1 - Face + Big Text + Emoji\n'
-    prompt_text += 'STYLE 2 - Action Frame + Red Circle\n'
-    prompt_text += 'STYLE 3 - Face + Text + Red Arrow\n'
-    prompt_text += 'STYLE 4 - Text-Heavy + Small Face\n'
-    prompt_text += 'STYLE 5 - Before/After Split\n'
-    prompt_text += 'STYLE 6 - Dramatic Zoom + Text\n\n'
-    prompt_text += 'For each: generate image, label "Style 1", "Style 2" etc.\n'
-    prompt_text += 'Output all 6 images so I can compare and choose.'
-
-    subprocess.run([
-        'curl', '-s', '-X', 'POST',
-        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
-        '-d', 'chat_id=' + CHAT_ID,
-        '-d', 'text=' + prompt_text
-    ])
-
-    time.sleep(3)
-
-    try:
-        os.remove(tts_path)
-        os.remove(ass_path)
-    except:
-        pass
-
-print('All shorts generated and sent for approval!')
+        '-loop', '1', '-t', str(tts_dur), '-
