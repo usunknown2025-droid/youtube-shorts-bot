@@ -1,61 +1,29 @@
-const staticData = $getWorkflowStaticData('global');
-const chatId = $('Telegram Trigger').item.json.message.chat.id;
-const userText = ($('Telegram Trigger').item.json.message.text || '').trim();
-const rowId = staticData['schedule_row_' + chatId];
+name: Scheduled Short Uploader
 
-// Parse "DD/MM/YY HH:MM AM/PM"
-const regex = /(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i;
-const match = userText.match(regex);
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
 
-if (!match) {
-  return [{
-    json: {
-      error: 'invalid_format',
-      chat_id: chatId,
-      row_id: rowId,
-      message: 'Format galat hai. Sahi format: DD/MM/YY HH:MM AM/PM'
-    }
-  }];
-}
+jobs:
+  check_and_upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-const day = parseInt(match[1], 10);
-const month = parseInt(match[2], 10) - 1;
-let year = parseInt(match[3], 10);
-if (year < 100) year += 2000;
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-const inputHour = parseInt(match[4], 10);
-const minute = parseInt(match[5], 10);
-const ampm = match[6].toUpperCase();
+      - name: Install dependencies
+        run: pip install requests
 
-// 24-hour conversion
-let hour24 = inputHour;
-if (ampm === 'PM' && inputHour < 12) hour24 = inputHour + 12;
-if (ampm === 'AM' && inputHour === 12) hour24 = 0;
-
-// USA Eastern Time (EDT Mar-Nov, EST rest)
-let offsetHours = -5;
-if (month >= 2 && month <= 10) {
-  offsetHours = -4;
-}
-
-const utcMillis = Date.UTC(year, month, day, hour24, minute) - (offsetHours * 60 * 60 * 1000);
-const utcDate = new Date(utcMillis);
-const scheduledForUtc = utcDate.toISOString();
-
-// Display
-const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const scheduledForEst = `${monthNames[month]} ${String(day).padStart(2,'0')}, ${year}, ${String(inputHour).padStart(2,'0')}:${String(minute).padStart(2,'0')} ${ampm}`;
-
-// Clear state
-delete staticData['schedule_state_' + chatId];
-delete staticData['schedule_row_' + chatId];
-
-return [{
-  json: {
-    success: true,
-    row_id: rowId,
-    chat_id: chatId,
-    scheduled_for_utc: scheduledForUtc,
-    scheduled_for_est: scheduledForEst
-  }
-}];
+      - name: Check and Upload Due Shorts
+        run: python3 scheduler.py
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
