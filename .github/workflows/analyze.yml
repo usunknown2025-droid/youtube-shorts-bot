@@ -2,7 +2,7 @@ name: Channel Analysis
 
 on:
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '30 17 */3 * *'
   workflow_dispatch:
 
 jobs:
