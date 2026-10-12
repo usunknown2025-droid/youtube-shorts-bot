@@ -103,7 +103,7 @@ def update_thumbnail_ids(row_id, thumb_ids_str):
         print('Update error: ' + str(e))
 
 
-print('\n=== STEP 1: Whisper Transcription ===')
+print('STEP 1: Whisper Transcription')
 model = WhisperModel('tiny', device='cpu', compute_type='int8')
 segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
 seg_data = []
@@ -121,7 +121,7 @@ video_total_duration = seg_data[-1]['end'] if seg_data else 60
 print('Video total duration: %0.1f seconds' % video_total_duration)
 
 
-print('\n=== STEP 2: Find Viral Moments ===')
+print('STEP 2: Find Viral Moments')
 max_possible = int(video_total_duration // DURATION)
 target_moments = min(NUM_SHORTS, max_possible)
 
@@ -225,7 +225,7 @@ def gen_yt_metadata(moment_text, commentary):
         except Exception as e:
             print('Metadata parse error: ' + str(e))
     return {
-        'title': 'Viral Moment You Must See!',
+        'title': 'Viral Moment You Must See',
         'description': 'Watch this amazing viral moment!\n\n#Shorts #Viral',
         'tags': ['shorts', 'viral', 'trending']
     }
@@ -370,7 +370,7 @@ def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
 
 
 for idx, moment in enumerate(moments):
-    print('\n========== SHORT ' + str(idx + 1) + '/' + str(len(moments)) + ' ==========')
+    print('SHORT ' + str(idx + 1) + '/' + str(len(moments)))
     start = float(moment['start'])
     end = float(moment['end'])
     duration = end - start
@@ -495,7 +495,7 @@ for idx, moment in enumerate(moments):
         '-d', 'reply_markup=' + keyboard
     ])
 
-    print('Generating thumbnails from Pollinations AI...')
+    print('Generating thumbnails...')
     thumbnail_urls = gen_thumbnails(title, moment_text)
     print('Generated ' + str(len(thumbnail_urls)) + ' thumbnails')
 
@@ -503,7 +503,7 @@ for idx, moment in enumerate(moments):
     for ti, thumb_url in enumerate(thumbnail_urls):
         thumb_keyboard = json.dumps({
             'inline_keyboard': [[
-                {'text': 'Ye Thumbnail Select Karo', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
+                {'text': 'Select This Thumbnail', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
             ]]
         })
         thumb_resp = subprocess.run([
@@ -533,4 +533,40 @@ for idx, moment in enumerate(moments):
         print('Saved ' + str(len(thumbnail_file_ids)) + ' thumbnail file_ids')
 
     prompt_text = 'CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
-    prompt_text += 'Agar Pollinations thumbnails pasand nahi aayi, toh ye pro
+    prompt_text += 'Copy this and paste in ChatGPT:\n\n'
+    prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
+    prompt_text += 'VIDEO TOPIC: ' + title + '\n\n'
+    prompt_text += 'RULES:\n'
+    prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
+    prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
+    prompt_text += '3. Large EMOJI in corner (shocked face, fire, money, lightning)\n'
+    prompt_text += '4. RED CIRCLE or RED ARROW pointing to key detail\n'
+    prompt_text += '5. HIGH CONTRAST, saturated vibrant colors\n'
+    prompt_text += '6. Text readable on mobile, max 4 words\n'
+    prompt_text += '7. Format: 9:16 vertical (720x1280)\n\n'
+    prompt_text += 'GENERATE THESE 6 STYLES:\n\n'
+    prompt_text += 'STYLE 1 - Face + Big Text + Emoji\n'
+    prompt_text += 'STYLE 2 - Action Frame + Red Circle\n'
+    prompt_text += 'STYLE 3 - Face + Text + Red Arrow\n'
+    prompt_text += 'STYLE 4 - Text-Heavy + Small Face\n'
+    prompt_text += 'STYLE 5 - Before/After Split\n'
+    prompt_text += 'STYLE 6 - Dramatic Zoom + Text\n\n'
+    prompt_text += 'For each: generate image, label "Style 1", "Style 2" etc.\n'
+    prompt_text += 'Output all 6 images so I can compare and choose.'
+
+    subprocess.run([
+        'curl', '-s', '-X', 'POST',
+        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
+        '-d', 'chat_id=' + CHAT_ID,
+        '-d', 'text=' + prompt_text
+    ])
+
+    time.sleep(3)
+
+    try:
+        os.remove(tts_path)
+        os.remove(ass_path)
+    except:
+        pass
+
+print('All shorts generated and sent for approval!')
