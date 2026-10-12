@@ -89,6 +89,20 @@ def save_to_supabase(chat_id, file_id, title, description, tags, short_number, t
     return None
 
 
+def update_thumbnail_ids(row_id, thumb_ids_str):
+    url = SUPABASE_URL + '/rest/v1/pending_shorts?id=eq.' + str(row_id)
+    headers = {
+        'apikey': SUPABASE_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_KEY,
+        'Content-Type': 'application/json'
+    }
+    try:
+        requests.patch(url, headers=headers, json={'thumbnail_urls': thumb_ids_str}, timeout=30)
+        print('Updated thumbnails for row ' + str(row_id))
+    except Exception as e:
+        print('Update error: ' + str(e))
+
+
 print('\n=== STEP 1: Whisper Transcription ===')
 model = WhisperModel('tiny', device='cpu', compute_type='int8')
 segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
@@ -215,6 +229,47 @@ def gen_yt_metadata(moment_text, commentary):
         'description': 'Watch this amazing viral moment!\n\n#Shorts #Viral',
         'tags': ['shorts', 'viral', 'trending']
     }
+
+
+def gen_thumbnail_prompt(title, transcript):
+    prompt = 'Create a short IMAGE GENERATION prompt for a MrBeast-style YouTube Shorts thumbnail.\n\n'
+    prompt += 'VIDEO TITLE: ' + title + '\n\n'
+    prompt += 'VIDEO CONTENT: ' + transcript[:400] + '\n\n'
+    prompt += 'REQUIREMENTS:\n'
+    prompt += '- Real human face with SHOCKED or EXCITED expression\n'
+    prompt += '- The main subject/action from the video\n'
+    prompt += '- Vibrant saturated colors, high contrast\n'
+    prompt += '- MrBeast YouTube thumbnail style, 9:16 vertical\n\n'
+    prompt += 'Return ONLY the image prompt text (max 250 chars), no quotes, no labels.'
+    result = groq_call(prompt, max_tokens=250, temp=0.7)
+    if result:
+        t = result.strip()
+        t = re.sub(r'["\n\r]', ' ', t)
+        return t[:250]
+    return title
+
+
+def gen_thumbnails(title, transcript):
+    base_prompt = gen_thumbnail_prompt(title, transcript)
+    print('Thumbnail base prompt: ' + base_prompt)
+
+    variations = [
+        'shocked face close-up, mouth open, eyes wide, MrBeast thumbnail style',
+        'excited face, hand on face, dramatic lighting, YouTube thumbnail',
+        'action shot with main subject, vibrant colors, cinematic',
+        'text-heavy composition, bold letters, bright saturated background'
+    ]
+
+    thumbnail_urls = []
+    for i in range(4):
+        full_prompt = base_prompt + ', ' + variations[i]
+        encoded = requests.utils.quote(full_prompt)
+        thumb_url = 'https://image.pollinations.ai/prompt/' + encoded + '?width=720&height=1280&model=flux&nologo=true&seed=' + str(i * 137)
+        thumbnail_urls.append(thumb_url)
+        print('Thumbnail ' + str(i + 1) + ': ' + thumb_url)
+        time.sleep(16)
+
+    return thumbnail_urls
 
 
 def gen_tts(text, path):
@@ -406,6 +461,7 @@ for idx, moment in enumerate(moments):
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
 
+    print('Saving to Supabase...')
     row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, '')
     print('Supabase row ID: ' + str(row_id))
 
@@ -440,50 +496,42 @@ for idx, moment in enumerate(moments):
         '-d', 'reply_markup=' + keyboard
     ])
 
-    # Send ChatGPT thumbnail prompt
-    prompt_text = '🎨 *THUMBNAIL PROMPT for Short ' + str(idx + 1) + '*\n\n'
-    prompt_text += 'Copy this entire message and paste in ChatGPT:\n\n'
-    prompt_text += '━━━━━━━━━━━━━━━━━━━━━━\n'
-    prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
-    prompt_text += 'VIDEO TOPIC: "' + title + '"\n\n'
-    prompt_text += 'RULES:\n'
-    prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
-    prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
-    prompt_text += '3. Large EMOJI in corner (shocked face, fire, money, lightning)\n'
-    prompt_text += '4. RED CIRCLE or RED ARROW pointing to key detail\n'
-    prompt_text += '5. HIGH CONTRAST, saturated vibrant colors\n'
-    prompt_text += '6. Text readable on mobile, max 4 words\n'
-    prompt_text += '7. Format: 9:16 vertical (720x1280)\n\n'
-    prompt_text += 'GENERATE THESE 6 STYLES:\n\n'
-    prompt_text += 'STYLE 1 - Face + Big Text + Emoji:\n'
-    prompt_text += 'Large shocked/excited face, big emoji in top-right corner, bold yellow text at bottom with black outline\n\n'
-    prompt_text += 'STYLE 2 - Action Frame + Red Circle:\n'
-    prompt_text += 'Video action frame as background, red circle highlighting key moment, small face reaction in corner, bold text at bottom\n\n'
-    prompt_text += 'STYLE 3 - Face + Text + Red Arrow:\n'
-    prompt_text += 'Shocked face on one side, red arrow pointing toward key detail, multi-line bold text\n\n'
-    prompt_text += 'STYLE 4 - Text-Heavy + Small Face:\n'
-    prompt_text += 'HUGE bold text taking 60% of screen, small face in bottom corner, solid bright background\n\n'
-    prompt_text += 'STYLE 5 - Before/After Split:\n'
-    prompt_text += 'Screen split in 2 halves, big VS in middle, bold text on top, shocked face on one side\n\n'
-    prompt_text += 'STYLE 6 - Dramatic Zoom + Text:\n'
-    prompt_text += 'Extreme close-up of face, big emoji overlay, bold text at top and bottom\n\n'
-    prompt_text += 'For each thumbnail: Generate the image, label it "Style 1", "Style 2" etc.\n'
-    prompt_text += 'Output all 6 images so I can compare and choose.\n'
-    prompt_text += '━━━━━━━━━━━━━━━━━━━━━━'
+    print('Generating thumbnails from Pollinations AI...')
+    thumbnail_urls = gen_thumbnails(title, moment_text)
+    print('Generated ' + str(len(thumbnail_urls)) + ' thumbnails')
 
-    subprocess.run([
-        'curl', '-s', '-X', 'POST',
-        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
-        '-d', 'chat_id=' + CHAT_ID,
-        '-d', 'text=' + prompt_text
-    ])
+    thumbnail_file_ids = []
+    for ti, thumb_url in enumerate(thumbnail_urls):
+        thumb_keyboard = json.dumps({
+            'inline_keyboard': [[
+                {'text': '✅ Ye Thumbnail Select Karo', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
+            ]]
+        })
+        thumb_resp = subprocess.run([
+            'curl', '-s', '-X', 'POST',
+            'https://api.telegram.org/bot' + BOT_TOKEN + '/sendPhoto',
+            '-F', 'chat_id=' + CHAT_ID,
+            '-F', 'photo=' + thumb_url,
+            '-F', 'caption=🎨 Thumbnail ' + str(ti + 1) + ' - Short ' + str(idx + 1),
+            '-F', 'reply_markup=' + thumb_keyboard
+        ], capture_output=True, text=True)
 
-    time.sleep(3)
+        try:
+            resp_json = json.loads(thumb_resp.stdout)
+            if resp_json.get('ok'):
+                photo_list = resp_json['result']['photo']
+                thumb_file_id = photo_list[-1]['file_id']
+                thumbnail_file_ids.append(thumb_file_id)
+                print('Thumbnail ' + str(ti + 1) + ' File ID: ' + thumb_file_id)
+            else:
+                print('Thumbnail ' + str(ti + 1) + ' failed')
+        except Exception as e:
+            print('Thumbnail parse error: ' + str(e))
 
-    try:
-        os.remove(tts_path)
-        os.remove(ass_path)
-    except:
-        pass
+    if thumbnail_file_ids:
+        thumb_ids_str = ','.join(thumbnail_file_ids)
+        update_thumbnail_ids(row_id, thumb_ids_str)
+        print('Saved ' + str(len(thumbnail_file_ids)) + ' thumbnail file_ids')
 
-print('\nAll shorts generated and sent for approval!')
+    # Send ChatGPT thumbnail prompt as backup
+    prompt_text = '🎨 *CHATGPT THUMBNAIL 
