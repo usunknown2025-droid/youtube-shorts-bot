@@ -217,41 +217,6 @@ def gen_yt_metadata(moment_text, commentary):
     }
 
 
-def gen_frame_thumbnails(video_path, moment_start, moment_duration, title, output_prefix):
-    text_words = title.split()[:4]
-    thumb_text = ' '.join(text_words).upper()
-    thumb_text = re.sub(r'[^A-Z0-9 ]', '', thumb_text)
-    if len(thumb_text) > 22:
-        thumb_text = thumb_text[:22].strip()
-    print('Thumbnail text: ' + thumb_text)
-
-    positions = [0.2, 0.45, 0.7, 0.9]
-    thumbnails = []
-    font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-
-    for i, pos in enumerate(positions):
-        timestamp = moment_start + (moment_duration * pos)
-        out_path = '%s_%d.jpg' % (output_prefix, i)
-        vf = (
-            "scale=720:1280:force_original_aspect_ratio=increase,"
-            "crop=720:1280,"
-            "drawtext=text='" + thumb_text + "':"
-            "fontcolor=Yellow:fontsize=76:"
-            "borderw=6:bordercolor=Black:"
-            "x=(w-text_w)/2:y=h*0.08:"
-            "fontfile=" + font_path
-        )
-        subprocess.run([
-            'ffmpeg', '-y', '-ss', str(timestamp), '-i', video_path,
-            '-vframes', '1', '-vf', vf, '-q:v', '2', out_path
-        ], capture_output=True)
-        if os.path.exists(out_path):
-            thumbnails.append(out_path)
-            print('Thumbnail %d created' % (i + 1))
-
-    return thumbnails
-
-
 def gen_tts(text, path):
     for attempt in range(3):
         try:
@@ -441,9 +406,6 @@ for idx, moment in enumerate(moments):
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
 
-    print('Generating thumbnails...')
-    thumbnails = gen_frame_thumbnails('video.mp4', start, duration, title, 'thumb_%d' % idx)
-
     row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, '')
     print('Supabase row ID: ' + str(row_id))
 
@@ -478,51 +440,49 @@ for idx, moment in enumerate(moments):
         '-d', 'reply_markup=' + keyboard
     ])
 
-    thumbnail_file_ids = []
-    for ti, thumb_path in enumerate(thumbnails):
-        thumb_keyboard = json.dumps({
-            'inline_keyboard': [[
-                {'text': '✅ Ye Thumbnail Select Karo', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
-            ]]
-        })
-        thumb_resp = subprocess.run([
-            'curl', '-s', '-X', 'POST',
-            'https://api.telegram.org/bot' + BOT_TOKEN + '/sendPhoto',
-            '-F', 'chat_id=' + CHAT_ID,
-            '-F', 'photo=@' + thumb_path,
-            '-F', 'caption=🎨 Thumbnail ' + str(ti + 1),
-            '-F', 'reply_markup=' + thumb_keyboard
-        ], capture_output=True, text=True)
+    # Send ChatGPT thumbnail prompt
+    prompt_text = '🎨 *THUMBNAIL PROMPT for Short ' + str(idx + 1) + '*\n\n'
+    prompt_text += 'Copy this entire message and paste in ChatGPT:\n\n'
+    prompt_text += '━━━━━━━━━━━━━━━━━━━━━━\n'
+    prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
+    prompt_text += 'VIDEO TOPIC: "' + title + '"\n\n'
+    prompt_text += 'RULES:\n'
+    prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
+    prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
+    prompt_text += '3. Large EMOJI in corner (shocked face, fire, money, lightning)\n'
+    prompt_text += '4. RED CIRCLE or RED ARROW pointing to key detail\n'
+    prompt_text += '5. HIGH CONTRAST, saturated vibrant colors\n'
+    prompt_text += '6. Text readable on mobile, max 4 words\n'
+    prompt_text += '7. Format: 9:16 vertical (720x1280)\n\n'
+    prompt_text += 'GENERATE THESE 6 STYLES:\n\n'
+    prompt_text += 'STYLE 1 - Face + Big Text + Emoji:\n'
+    prompt_text += 'Large shocked/excited face, big emoji in top-right corner, bold yellow text at bottom with black outline\n\n'
+    prompt_text += 'STYLE 2 - Action Frame + Red Circle:\n'
+    prompt_text += 'Video action frame as background, red circle highlighting key moment, small face reaction in corner, bold text at bottom\n\n'
+    prompt_text += 'STYLE 3 - Face + Text + Red Arrow:\n'
+    prompt_text += 'Shocked face on one side, red arrow pointing toward key detail, multi-line bold text\n\n'
+    prompt_text += 'STYLE 4 - Text-Heavy + Small Face:\n'
+    prompt_text += 'HUGE bold text taking 60% of screen, small face in bottom corner, solid bright background\n\n'
+    prompt_text += 'STYLE 5 - Before/After Split:\n'
+    prompt_text += 'Screen split in 2 halves, big VS in middle, bold text on top, shocked face on one side\n\n'
+    prompt_text += 'STYLE 6 - Dramatic Zoom + Text:\n'
+    prompt_text += 'Extreme close-up of face, big emoji overlay, bold text at top and bottom\n\n'
+    prompt_text += 'For each thumbnail: Generate the image, label it "Style 1", "Style 2" etc.\n'
+    prompt_text += 'Output all 6 images so I can compare and choose.\n'
+    prompt_text += '━━━━━━━━━━━━━━━━━━━━━━'
 
-        try:
-            resp_json = json.loads(thumb_resp.stdout)
-            if resp_json.get('ok'):
-                photo_list = resp_json['result']['photo']
-                thumb_file_id = photo_list[-1]['file_id']
-                thumbnail_file_ids.append(thumb_file_id)
-                print('Thumbnail %d File ID saved' % (ti + 1))
-        except Exception as e:
-            print('Thumbnail parse error: ' + str(e))
-
-    if thumbnail_file_ids:
-        thumb_ids_str = ','.join(thumbnail_file_ids)
-        url = SUPABASE_URL + '/rest/v1/pending_shorts?id=eq.' + str(row_id)
-        headers = {
-            'apikey': SUPABASE_KEY,
-            'Authorization': 'Bearer ' + SUPABASE_KEY,
-            'Content-Type': 'application/json'
-        }
-        requests.patch(url, headers=headers, json={'thumbnail_urls': thumb_ids_str}, timeout=30)
-        print('Saved thumbnail file_ids to Supabase')
+    subprocess.run([
+        'curl', '-s', '-X', 'POST',
+        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
+        '-d', 'chat_id=' + CHAT_ID,
+        '-d', 'text=' + prompt_text
+    ])
 
     time.sleep(3)
 
     try:
         os.remove(tts_path)
         os.remove(ass_path)
-        for tp in thumbnails:
-            if os.path.exists(tp):
-                os.remove(tp)
     except:
         pass
 
