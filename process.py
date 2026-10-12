@@ -89,20 +89,6 @@ def save_to_supabase(chat_id, file_id, title, description, tags, short_number, t
     return None
 
 
-def update_thumbnail_ids(row_id, thumb_ids_str):
-    url = SUPABASE_URL + '/rest/v1/pending_shorts?id=eq.' + str(row_id)
-    headers = {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
-        'Content-Type': 'application/json'
-    }
-    try:
-        requests.patch(url, headers=headers, json={'thumbnail_urls': thumb_ids_str}, timeout=30)
-        print('Updated thumbnails for row ' + str(row_id))
-    except Exception as e:
-        print('Update error: ' + str(e))
-
-
 print('STEP 1: Whisper Transcription')
 model = WhisperModel('tiny', device='cpu', compute_type='int8')
 segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
@@ -225,51 +211,10 @@ def gen_yt_metadata(moment_text, commentary):
         except Exception as e:
             print('Metadata parse error: ' + str(e))
     return {
-        'title': 'Viral Moment You Must See',
+        'title': 'Viral Moment You Must See! 🔥',
         'description': 'Watch this amazing viral moment!\n\n#Shorts #Viral',
         'tags': ['shorts', 'viral', 'trending']
     }
-
-
-def gen_thumbnail_prompt(title, transcript):
-    prompt = 'Create a short IMAGE GENERATION prompt for a MrBeast-style YouTube Shorts thumbnail.\n\n'
-    prompt += 'VIDEO TITLE: ' + title + '\n\n'
-    prompt += 'VIDEO CONTENT: ' + transcript[:400] + '\n\n'
-    prompt += 'REQUIREMENTS:\n'
-    prompt += '- Real human face with SHOCKED or EXCITED expression\n'
-    prompt += '- The main subject/action from the video\n'
-    prompt += '- Vibrant saturated colors, high contrast\n'
-    prompt += '- MrBeast YouTube thumbnail style, 9:16 vertical\n\n'
-    prompt += 'Return ONLY the image prompt text (max 250 chars), no quotes, no labels.'
-    result = groq_call(prompt, max_tokens=250, temp=0.7)
-    if result:
-        t = result.strip()
-        t = re.sub(r'["\n\r]', ' ', t)
-        return t[:250]
-    return title
-
-
-def gen_thumbnails(title, transcript):
-    base_prompt = gen_thumbnail_prompt(title, transcript)
-    print('Thumbnail base prompt: ' + base_prompt)
-
-    variations = [
-        'shocked face close-up, mouth open, eyes wide, MrBeast thumbnail style',
-        'excited face, hand on face, dramatic lighting, YouTube thumbnail',
-        'action shot with main subject, vibrant colors, cinematic',
-        'text-heavy composition, bold letters, bright saturated background'
-    ]
-
-    thumbnail_urls = []
-    for i in range(4):
-        full_prompt = base_prompt + ', ' + variations[i]
-        encoded = requests.utils.quote(full_prompt)
-        thumb_url = 'https://image.pollinations.ai/prompt/' + encoded + '?width=720&height=1280&model=flux&nologo=true&seed=' + str(i * 137)
-        thumbnail_urls.append(thumb_url)
-        print('Thumbnail ' + str(i + 1) + ': ' + thumb_url)
-        time.sleep(16)
-
-    return thumbnail_urls
 
 
 def gen_tts(text, path):
@@ -471,20 +416,20 @@ for idx, moment in enumerate(moments):
     keyboard = json.dumps({
         'inline_keyboard': [
             [
-                {'text': 'Upload', 'callback_data': 'approve_' + str(row_id)},
-                {'text': 'Schedule', 'callback_data': 'schedule_' + str(row_id)}
+                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
+                {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
             ],
             [
-                {'text': 'Custom', 'callback_data': 'custom_' + str(row_id)},
-                {'text': 'Skip', 'callback_data': 'skip_' + str(row_id)}
+                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
+                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
             ]
         ]
     })
 
-    approval_text = 'Short ' + str(idx + 1) + '/' + str(len(moments)) + '\n\n'
-    approval_text += 'Title: ' + title + '\n\n'
-    approval_text += 'Description: ' + description + '\n\n'
-    approval_text += 'Tags: ' + tags[:150] + '...\n\n'
+    approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
+    approval_text += '📄 Title: ' + title + '\n\n'
+    approval_text += '📝 Description: ' + description + '\n\n'
+    approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
     approval_text += 'Kya karna hai?'
 
     subprocess.run([
@@ -492,67 +437,54 @@ for idx, moment in enumerate(moments):
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
         '-d', 'chat_id=' + CHAT_ID,
         '-d', 'text=' + approval_text,
+        '-d', 'parse_mode=Markdown',
         '-d', 'reply_markup=' + keyboard
     ])
 
-    print('Generating thumbnails...')
-    thumbnail_urls = gen_thumbnails(title, moment_text)
-    print('Generated ' + str(len(thumbnail_urls)) + ' thumbnails')
+    prompt_lines = []
+    prompt_lines.append('CHATGPT 6-STYLE THUMBNAIL PROMPT for Short ' + str(idx + 1))
+    prompt_lines.append('')
+    prompt_lines.append('Copy this entire message and paste in ChatGPT:')
+    prompt_lines.append('')
+    prompt_lines.append('========================================')
+    prompt_lines.append('You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:')
+    prompt_lines.append('')
+    prompt_lines.append('VIDEO TOPIC: ' + title)
+    prompt_lines.append('')
+    prompt_lines.append('CRITICAL DESIGN RULES:')
+    prompt_lines.append('1. Real human face with SHOCKED or EXCITED expression')
+    prompt_lines.append('2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)')
+    prompt_lines.append('3. Large EMOJI in corner (shocked face, fire, money, lightning)')
+    prompt_lines.append('4. RED CIRCLE or RED ARROW pointing to key detail')
+    prompt_lines.append('5. HIGH CONTRAST, saturated vibrant colors')
+    prompt_lines.append('6. Text readable on mobile, max 4 words')
+    prompt_lines.append('7. Format: 9:16 vertical (720x1280)')
+    prompt_lines.append('')
+    prompt_lines.append('GENERATE THESE 6 STYLES:')
+    prompt_lines.append('')
+    prompt_lines.append('STYLE 1 - Face + Big Text + Emoji:')
+    prompt_lines.append('Large shocked face, big emoji top-right corner, bold yellow text at bottom')
+    prompt_lines.append('')
+    prompt_lines.append('STYLE 2 - Action Frame + Red Circle:')
+    prompt_lines.append('Action frame, red circle on key moment, small face reaction in corner')
+    prompt_lines.append('')
+    prompt_lines.append('STYLE 3 - Face + Text + Red Arrow:')
+    prompt_lines.append('Shocked face one side, red arrow to key detail, multi-line bold text')
+    prompt_lines.append('')
+    prompt_lines.append('STYLE 4 - Text-Heavy + Small Face:')
+    prompt_lines.append('HUGE bold text 60% of screen, small face bottom corner, solid bright background')
+    prompt_lines.append('')
+    prompt_lines.append('STYLE 5 - Before/After Split:')
+    prompt_lines.append('Screen split 2 halves, big VS in middle, bold text on top')
+    prompt_lines.append('')
+    prompt_lines.append('STYLE 6 - Dramatic Zoom + Text:')
+    prompt_lines.append('Extreme close-up face, big emoji overlay, bold text top and bottom')
+    prompt_lines.append('')
+    prompt_lines.append('For each: generate image, label Style 1, Style 2 etc.')
+    prompt_lines.append('Output all 6 images so I can compare and choose.')
+    prompt_lines.append('========================================')
 
-    thumbnail_file_ids = []
-    for ti, thumb_url in enumerate(thumbnail_urls):
-        thumb_keyboard = json.dumps({
-            'inline_keyboard': [[
-                {'text': 'Select This Thumbnail', 'callback_data': 'thumb_' + str(row_id) + '_' + str(ti)}
-            ]]
-        })
-        thumb_resp = subprocess.run([
-            'curl', '-s', '-X', 'POST',
-            'https://api.telegram.org/bot' + BOT_TOKEN + '/sendPhoto',
-            '-F', 'chat_id=' + CHAT_ID,
-            '-F', 'photo=' + thumb_url,
-            '-F', 'caption=Thumbnail ' + str(ti + 1) + ' - Short ' + str(idx + 1),
-            '-F', 'reply_markup=' + thumb_keyboard
-        ], capture_output=True, text=True)
-
-        try:
-            resp_json = json.loads(thumb_resp.stdout)
-            if resp_json.get('ok'):
-                photo_list = resp_json['result']['photo']
-                thumb_file_id = photo_list[-1]['file_id']
-                thumbnail_file_ids.append(thumb_file_id)
-                print('Thumbnail ' + str(ti + 1) + ' File ID: ' + thumb_file_id)
-            else:
-                print('Thumbnail ' + str(ti + 1) + ' failed')
-        except Exception as e:
-            print('Thumbnail parse error: ' + str(e))
-
-    if thumbnail_file_ids:
-        thumb_ids_str = ','.join(thumbnail_file_ids)
-        update_thumbnail_ids(row_id, thumb_ids_str)
-        print('Saved ' + str(len(thumbnail_file_ids)) + ' thumbnail file_ids')
-
-    prompt_text = 'CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
-    prompt_text += 'Copy this and paste in ChatGPT:\n\n'
-    prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
-    prompt_text += 'VIDEO TOPIC: ' + title + '\n\n'
-    prompt_text += 'RULES:\n'
-    prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
-    prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
-    prompt_text += '3. Large EMOJI in corner (shocked face, fire, money, lightning)\n'
-    prompt_text += '4. RED CIRCLE or RED ARROW pointing to key detail\n'
-    prompt_text += '5. HIGH CONTRAST, saturated vibrant colors\n'
-    prompt_text += '6. Text readable on mobile, max 4 words\n'
-    prompt_text += '7. Format: 9:16 vertical (720x1280)\n\n'
-    prompt_text += 'GENERATE THESE 6 STYLES:\n\n'
-    prompt_text += 'STYLE 1 - Face + Big Text + Emoji\n'
-    prompt_text += 'STYLE 2 - Action Frame + Red Circle\n'
-    prompt_text += 'STYLE 3 - Face + Text + Red Arrow\n'
-    prompt_text += 'STYLE 4 - Text-Heavy + Small Face\n'
-    prompt_text += 'STYLE 5 - Before/After Split\n'
-    prompt_text += 'STYLE 6 - Dramatic Zoom + Text\n\n'
-    prompt_text += 'For each: generate image, label "Style 1", "Style 2" etc.\n'
-    prompt_text += 'Output all 6 images so I can compare and choose.'
+    prompt_text = '\n'.join(prompt_lines)
 
     subprocess.run([
         'curl', '-s', '-X', 'POST',
