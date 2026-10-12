@@ -176,29 +176,42 @@ print('Final: Got ' + str(len(moments)) + ' moments')
 
 
 def gen_commentary(moment_text):
-    prompt = 'Write short ENGLISH commentary (max 40 words). PURE ENGLISH only. Describe the SPECIFIC action happening.\n\n'
+    prompt = 'Write short ENGLISH commentary (max 35 words) for this video segment.\n\n'
+    prompt += 'RULES:\n'
+    prompt += '1. PURE ENGLISH only - no Hindi, no other scripts\n'
+    prompt += '2. Describe the SPECIFIC action happening in the video\n'
+    prompt += '3. End with a CALL TO ACTION like "Comment what you think!" or "Follow for more!"\n'
+    prompt += '4. Keep it under 35 words total\n'
+    prompt += '5. Just the commentary, no labels\n\n'
     prompt += 'Segment: ' + moment_text[:800]
     for attempt in range(3):
-        result = groq_call(prompt, max_tokens=150, temp=0.7)
+        result = groq_call(prompt, max_tokens=180, temp=0.7)
         if result:
             t = result.strip()
             if not contains_non_english(t):
                 return t
         time.sleep(10)
-    return 'Check out this amazing moment!'
+    return 'Check out this amazing moment! Comment what you think!'
 
 
 def gen_yt_metadata(moment_text, commentary):
-    prompt = 'Generate YouTube Shorts metadata for this actual video content.\n\n'
+    prompt = 'Generate YouTube Shorts metadata for this video. This is for SEO - make it findable in search.\n\n'
     prompt += 'TRANSCRIPT: ' + moment_text[:800] + '\n\n'
     prompt += 'COMMENTARY: ' + commentary[:300] + '\n\n'
-    prompt += 'RULES:\n'
-    prompt += '1. Title must mention SPECIFIC event\n'
-    prompt += '2. Description must describe what happens (2-3 lines)\n'
-    prompt += '3. Tags must include content-specific ones\n\n'
+    prompt += 'CRITICAL SEO RULES:\n'
+    prompt += '1. TITLE: Must include 2-3 HIGH-SEARCH KEYWORDS that people actually search for\n'
+    prompt += '   - Example: "Kenya Water Well", "Clean Water Project", "Rural Engineering"\n'
+    prompt += '   - NOT generic words like "Amazing", "Incredible", "Viral" alone\n'
+    prompt += '   - Must be specific to the actual content\n'
+    prompt += '2. DESCRIPTION: 2-3 lines with SEO keywords + 3-5 relevant hashtags\n'
+    prompt += '   - First line must have main keyword\n'
+    prompt += '   - End with 3-5 hashtags like #KenyaWater #CleanWater #Shorts\n'
+    prompt += '3. TAGS: 12-15 specific tags (mix of high-search and long-tail)\n'
+    prompt += '   - Include: topic keywords, location, action words, category\n'
+    prompt += '   - Example: "kenya water well", "clean drinking water", "rural engineering", "humanitarian project", "water well construction", "african development"\n\n'
     prompt += 'Return ONLY JSON:\n'
     prompt += '{"title": "...", "description": "...", "tags": ["tag1", "tag2"]}'
-    result = groq_call(prompt, max_tokens=500, temp=0.5, json_mode=True)
+    result = groq_call(prompt, max_tokens=600, temp=0.4, json_mode=True)
     if result:
         try:
             clean = result.strip()
@@ -365,12 +378,13 @@ for idx, moment in enumerate(moments):
     commentary = re.sub(r'["\'\n\r]', ' ', commentary).strip()[:300]
     print('Commentary: ' + commentary)
 
-    print('Generating metadata...')
+    print('Generating metadata with SEO...')
     meta = gen_yt_metadata(moment_text, commentary)
     title = meta.get('title', 'Viral Moment')
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
     print('Title: ' + title)
+    print('Tags: ' + tags[:200])
 
     tts_path = 'tts_%d.mp3' % idx
     if not gen_tts(commentary, tts_path):
