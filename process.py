@@ -463,20 +463,20 @@ for idx, moment in enumerate(moments):
     keyboard = json.dumps({
         'inline_keyboard': [
             [
-                {'text': 'Upload', 'callback_data': 'approve_' + str(row_id)},
-                {'text': 'Schedule', 'callback_data': 'schedule_' + str(row_id)}
+                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
+                {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
             ],
             [
-                {'text': 'Custom', 'callback_data': 'custom_' + str(row_id)},
-                {'text': 'Skip', 'callback_data': 'skip_' + str(row_id)}
+                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
+                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
             ]
         ]
     })
 
-    approval_text = 'Short ' + str(idx + 1) + '/' + str(len(moments)) + '\n\n'
-    approval_text += 'Title: ' + title + '\n\n'
-    approval_text += 'Description: ' + description + '\n\n'
-    approval_text += 'Tags: ' + tags[:150] + '...\n\n'
+    approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
+    approval_text += '📄 Title: ' + title + '\n\n'
+    approval_text += '📝 Description: ' + description + '\n\n'
+    approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
     approval_text += 'Kya karna hai?'
 
     subprocess.run([
@@ -484,17 +484,18 @@ for idx, moment in enumerate(moments):
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
         '-d', 'chat_id=' + CHAT_ID,
         '-d', 'text=' + approval_text,
+        '-d', 'parse_mode=Markdown',
         '-d', 'reply_markup=' + keyboard
     ])
 
-    prompt_text = 'CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
+    prompt_text = '🎨 CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
     prompt_text += 'Copy this and paste in ChatGPT:\n\n'
     prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
     prompt_text += 'VIDEO TOPIC: ' + title + '\n\n'
     prompt_text += 'RULES:\n'
     prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
     prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
-    prompt_text += '3. Large EMOJI in corner\n'
+    prompt_text += '3. Large EMOJI in corner (shocked face, fire, money, lightning)\n'
     prompt_text += '4. RED CIRCLE or RED ARROW pointing to key detail\n'
     prompt_text += '5. HIGH CONTRAST, saturated vibrant colors\n'
     prompt_text += '6. Text readable on mobile, max 4 words\n'
