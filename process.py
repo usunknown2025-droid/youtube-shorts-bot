@@ -361,10 +361,35 @@ for idx, moment in enumerate(moments):
     with open(ass_path, 'w', encoding='utf-8') as f:
         f.write(build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur))
 
+    # Hook frame extract karo
+    hook_frame = 'hook_%d.jpg' % idx
+    hook_offset = min(2.0, duration * 0.3)
+    hook_time = start + hook_offset
+    subprocess.run([
+        'ffmpeg', '-y', '-ss', str(hook_time), '-i', 'video.mp4',
+        '-vframes', '1', '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280',
+        '-q:v', '2', hook_frame
+    ], capture_output=True)
+
+    hook_words = title.split()[:3] if 'title' in dir() else []
+    hook_text = ' '.join(hook_words).upper()
+    hook_text = re.sub(r'[^A-Z0-9 !?]', '', hook_text)
+    if len(hook_text) > 20:
+        hook_text = hook_text[:20].strip()
+    if not hook_text:
+        hook_text = 'WATCH THIS'
+
+    font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+
     out_path = 'shorts_%d.mp4' % idx
-    vf = ("color=black:s=720x1280:d=" + str(tts_dur) + ":r=30[black];"
+    vf = ("[2:v]fps=30,scale=720:1280,"
+          "drawtext=text='" + hook_text + "':"
+          "fontcolor=Yellow:fontsize=80:"
+          "borderw=8:bordercolor=Black:"
+          "x=(w-text_w)/2:y=(h-text_h)/2:"
+          "fontfile=" + font_path + "[hookvid];"
           "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];"
-          "[black][v0]concat=n=2:v=1:a=0[vcat];"
+          "[hookvid][v0]concat=n=2:v=1:a=0[vcat];"
           "[vcat]ass=" + ass_path + "[v]")
     af = ("[1:a]volume=1.0[tts];"
           "[0:a]volume=0.2[orig];"
@@ -373,12 +398,18 @@ for idx, moment in enumerate(moments):
     subprocess.run([
         'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
         '-i', 'video.mp4', '-i', tts_path,
+        '-loop', '1', '-t', str(tts_dur), '-i', hook_frame,
         '-filter_complex', vf + ';' + af,
         '-map', '[v]', '-map', '[aout]',
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
         '-c:a', 'aac', '-b:a', '128k',
         out_path
     ])
+
+    try:
+        os.remove(hook_frame)
+    except:
+        pass
 
     print('Sending video to Telegram...')
     tg_response = subprocess.run([
@@ -416,20 +447,20 @@ for idx, moment in enumerate(moments):
     keyboard = json.dumps({
         'inline_keyboard': [
             [
-                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
-                {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
+                {'text': 'Upload', 'callback_data': 'approve_' + str(row_id)},
+                {'text': 'Schedule', 'callback_data': 'schedule_' + str(row_id)}
             ],
             [
-                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
-                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
+                {'text': 'Custom', 'callback_data': 'custom_' + str(row_id)},
+                {'text': 'Skip', 'callback_data': 'skip_' + str(row_id)}
             ]
         ]
     })
 
-    approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
-    approval_text += '📄 Title: ' + title + '\n\n'
-    approval_text += '📝 Description: ' + description + '\n\n'
-    approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
+    approval_text = 'Short ' + str(idx + 1) + '/' + str(len(moments)) + '\n\n'
+    approval_text += 'Title: ' + title + '\n\n'
+    approval_text += 'Description: ' + description + '\n\n'
+    approval_text += 'Tags: ' + tags[:150] + '...\n\n'
     approval_text += 'Kya karna hai?'
 
     subprocess.run([
@@ -437,54 +468,30 @@ for idx, moment in enumerate(moments):
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
         '-d', 'chat_id=' + CHAT_ID,
         '-d', 'text=' + approval_text,
-        '-d', 'parse_mode=Markdown',
         '-d', 'reply_markup=' + keyboard
     ])
 
-    prompt_lines = []
-    prompt_lines.append('CHATGPT 6-STYLE THUMBNAIL PROMPT for Short ' + str(idx + 1))
-    prompt_lines.append('')
-    prompt_lines.append('Copy this entire message and paste in ChatGPT:')
-    prompt_lines.append('')
-    prompt_lines.append('========================================')
-    prompt_lines.append('You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:')
-    prompt_lines.append('')
-    prompt_lines.append('VIDEO TOPIC: ' + title)
-    prompt_lines.append('')
-    prompt_lines.append('CRITICAL DESIGN RULES:')
-    prompt_lines.append('1. Real human face with SHOCKED or EXCITED expression')
-    prompt_lines.append('2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)')
-    prompt_lines.append('3. Large EMOJI in corner (shocked face, fire, money, lightning)')
-    prompt_lines.append('4. RED CIRCLE or RED ARROW pointing to key detail')
-    prompt_lines.append('5. HIGH CONTRAST, saturated vibrant colors')
-    prompt_lines.append('6. Text readable on mobile, max 4 words')
-    prompt_lines.append('7. Format: 9:16 vertical (720x1280)')
-    prompt_lines.append('')
-    prompt_lines.append('GENERATE THESE 6 STYLES:')
-    prompt_lines.append('')
-    prompt_lines.append('STYLE 1 - Face + Big Text + Emoji:')
-    prompt_lines.append('Large shocked face, big emoji top-right corner, bold yellow text at bottom')
-    prompt_lines.append('')
-    prompt_lines.append('STYLE 2 - Action Frame + Red Circle:')
-    prompt_lines.append('Action frame, red circle on key moment, small face reaction in corner')
-    prompt_lines.append('')
-    prompt_lines.append('STYLE 3 - Face + Text + Red Arrow:')
-    prompt_lines.append('Shocked face one side, red arrow to key detail, multi-line bold text')
-    prompt_lines.append('')
-    prompt_lines.append('STYLE 4 - Text-Heavy + Small Face:')
-    prompt_lines.append('HUGE bold text 60% of screen, small face bottom corner, solid bright background')
-    prompt_lines.append('')
-    prompt_lines.append('STYLE 5 - Before/After Split:')
-    prompt_lines.append('Screen split 2 halves, big VS in middle, bold text on top')
-    prompt_lines.append('')
-    prompt_lines.append('STYLE 6 - Dramatic Zoom + Text:')
-    prompt_lines.append('Extreme close-up face, big emoji overlay, bold text top and bottom')
-    prompt_lines.append('')
-    prompt_lines.append('For each: generate image, label Style 1, Style 2 etc.')
-    prompt_lines.append('Output all 6 images so I can compare and choose.')
-    prompt_lines.append('========================================')
-
-    prompt_text = '\n'.join(prompt_lines)
+    prompt_text = 'CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
+    prompt_text += 'Copy this and paste in ChatGPT:\n\n'
+    prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
+    prompt_text += 'VIDEO TOPIC: ' + title + '\n\n'
+    prompt_text += 'RULES:\n'
+    prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
+    prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
+    prompt_text += '3. Large EMOJI in corner\n'
+    prompt_text += '4. RED CIRCLE or RED ARROW pointing to key detail\n'
+    prompt_text += '5. HIGH CONTRAST, saturated vibrant colors\n'
+    prompt_text += '6. Text readable on mobile, max 4 words\n'
+    prompt_text += '7. Format: 9:16 vertical (720x1280)\n\n'
+    prompt_text += 'GENERATE THESE 6 STYLES:\n\n'
+    prompt_text += 'STYLE 1 - Face + Big Text + Emoji\n'
+    prompt_text += 'STYLE 2 - Action Frame + Red Circle\n'
+    prompt_text += 'STYLE 3 - Face + Text + Red Arrow\n'
+    prompt_text += 'STYLE 4 - Text-Heavy + Small Face\n'
+    prompt_text += 'STYLE 5 - Before/After Split\n'
+    prompt_text += 'STYLE 6 - Dramatic Zoom + Text\n\n'
+    prompt_text += 'For each: generate image, label "Style 1", "Style 2" etc.\n'
+    prompt_text += 'Output all 6 images so I can compare and choose.'
 
     subprocess.run([
         'curl', '-s', '-X', 'POST',
