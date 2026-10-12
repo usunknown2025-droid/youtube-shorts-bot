@@ -135,7 +135,7 @@ def groq_analyze(prompt):
         'model': 'openai/gpt-oss-120b',
         'messages': [{'role': 'user', 'content': prompt}],
         'temperature': 0.5,
-        'max_tokens': 1500
+        'max_tokens': 2000
     }
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=90)
@@ -160,114 +160,142 @@ def send_telegram(text):
 
 
 # ---------- MAIN ----------
-print('=== YOUTUBE CHANNEL ANALYSIS STARTED ===')
+print('=== CHANNEL ANALYSIS STARTED ===')
 
 access_token = get_access_token()
 if not access_token:
-    send_telegram('Channel analysis failed: access token error')
+    send_telegram('Bhai, channel analysis fail ho gaya - access token error')
     exit(1)
 
 end_date = datetime.now().strftime('%Y-%m-%d')
 start_date = (datetime.now() - timedelta(days=28)).strftime('%Y-%m-%d')
 
-print('Fetching recent videos...')
+print('Recent videos fetch kar raha hoon...')
 videos = get_channel_videos(access_token, 20)
 if not videos:
-    send_telegram('No videos found on channel')
+    send_telegram('Bhai, channel pe koi video nahi mili')
     exit(1)
 
 video_ids = [v['video_id'] for v in videos]
-print('Fetching stats for ' + str(len(video_ids)) + ' videos...')
+print('Video stats fetch kar raha hoon...')
 videos_with_stats = get_video_stats(access_token, video_ids)
 
-print('Fetching analytics data...')
+print('Analytics data fetch kar raha hoon...')
 analytics = get_analytics_data(access_token, start_date, end_date)
 
-print('Fetching traffic sources...')
+print('Traffic sources fetch kar raha hoon...')
 traffic = get_traffic_sources(access_token, start_date, end_date)
 
-# Build report
-report = 'YOUTUBE CHANNEL ANALYSIS\n'
-report += '=' * 40 + '\n\n'
-report += 'Period: Last 28 days\n'
-report += 'Total videos analyzed: ' + str(len(videos_with_stats)) + '\n\n'
-
+# Build raw data for AI
+raw_data = 'CHANNEL DATA (Last 28 days):\n\n'
+raw_data += 'Total videos: ' + str(len(videos_with_stats)) + '\n'
 total_views = sum(v['views'] for v in videos_with_stats)
 total_likes = sum(v['likes'] for v in videos_with_stats)
-report += 'Total views: ' + str(total_views) + '\n'
-report += 'Total likes: ' + str(total_likes) + '\n\n'
+total_comments = sum(v['comments'] for v in videos_with_stats)
+raw_data += 'Total views: ' + str(total_views) + '\n'
+raw_data += 'Total likes: ' + str(total_likes) + '\n'
+raw_data += 'Total comments: ' + str(total_comments) + '\n\n'
 
-# Top videos
+# All videos sorted
 sorted_videos = sorted(videos_with_stats, key=lambda x: x['views'], reverse=True)
-report += 'TOP 5 VIDEOS:\n'
+
+raw_data += 'TOP 5 VIDEOS:\n'
 for i, v in enumerate(sorted_videos[:5]):
-    report += str(i + 1) + '. "' + v['title'][:60] + '"\n'
-    report += '   Views: ' + str(v['views']) + ' | Likes: ' + str(v['likes']) + '\n'
+    raw_data += str(i + 1) + '. "' + v['title'] + '" - ' + str(v['views']) + ' views, ' + str(v['likes']) + ' likes, ' + str(v['comments']) + ' comments\n'
 
-report += '\nBOTTOM 5 VIDEOS:\n'
+raw_data += '\nBOTTOM 5 VIDEOS:\n'
 for i, v in enumerate(sorted_videos[-5:]):
-    report += str(i + 1) + '. "' + v['title'][:60] + '"\n'
-    report += '   Views: ' + str(v['views']) + ' | Likes: ' + str(v['likes']) + '\n'
+    raw_data += str(i + 1) + '. "' + v['title'] + '" - ' + str(v['views']) + ' views, ' + str(v['likes']) + ' likes\n'
 
-# Analytics
 if analytics:
-    report += '\nANALYTICS (Last 28 days):\n'
+    raw_data += '\nANALYTICS SUMMARY:\n'
     total_analytics_views = sum(a.get('views', 0) for a in analytics)
-    report += 'Total views: ' + str(total_analytics_views) + '\n'
+    raw_data += 'Total views (28 days): ' + str(total_analytics_views) + '\n'
     
-    if analytics:
-        avg_retention = sum(a.get('averageViewPercentage', 0) for a in analytics) / len(analytics)
-        report += 'Average retention: ' + str(round(avg_retention, 1)) + '%\n'
-        
-        avg_duration = sum(a.get('averageViewDuration', 0) for a in analytics) / len(analytics)
-        report += 'Average view duration: ' + str(round(avg_duration, 1)) + 's\n'
-        
-        total_subs = sum(a.get('subscribersGained', 0) for a in analytics)
-        report += 'Subscribers gained: ' + str(total_subs) + '\n'
+    avg_retention = sum(a.get('averageViewPercentage', 0) for a in analytics) / len(analytics)
+    raw_data += 'Average retention: ' + str(round(avg_retention, 1)) + '%\n'
+    
+    avg_duration = sum(a.get('averageViewDuration', 0) for a in analytics) / len(analytics)
+    raw_data += 'Average view duration: ' + str(round(avg_duration, 1)) + 's\n'
+    
+    total_subs = sum(a.get('subscribersGained', 0) for a in analytics)
+    raw_data += 'Subscribers gained: ' + str(total_subs) + '\n\n'
+    
+    raw_data += 'VIDEO-WISE RETENTION:\n'
+    for a in analytics[:10]:
+        vid_id = a.get('video', '')
+        matching_video = next((v for v in sorted_videos if v['video_id'] == vid_id), None)
+        title = matching_video['title'][:40] if matching_video else vid_id[:10]
+        retention = a.get('averageViewPercentage', 0)
+        views = a.get('views', 0)
+        raw_data += '- "' + title + '": ' + str(views) + ' views, ' + str(round(retention, 1)) + '% retention\n'
 
-# Traffic
 if traffic:
-    report += '\nTRAFFIC SOURCES:\n'
-    for t in traffic[:5]:
-        report += '- ' + str(t.get('insightTrafficSourceType', 'Unknown')) + ': ' + str(t.get('views', 0)) + ' views\n'
+    raw_data += '\nTRAFFIC SOURCES:\n'
+    for t in traffic[:8]:
+        source = t.get('insightTrafficSourceType', 'Unknown')
+        views = t.get('views', 0)
+        raw_data += '- ' + str(source) + ': ' + str(views) + ' views\n'
 
-# AI Analysis
-print('Running Groq analysis...')
-prompt = 'You are a YouTube Shorts analytics expert. Analyze this channel data and give SPECIFIC, ACTIONABLE advice.\n\n'
-prompt += 'CHANNEL DATA (last 28 days):\n'
-prompt += report + '\n\n'
-prompt += 'Videos data:\n'
-for v in sorted_videos[:10]:
-    prompt += '- "' + v['title'][:50] + '": ' + str(v['views']) + ' views, ' + str(v['likes']) + ' likes\n'
-prompt += '\nTraffic data:\n'
-for t in traffic[:5]:
-    prompt += '- ' + str(t.get('insightTrafficSourceType', 'Unknown')) + ': ' + str(t.get('views', 0)) + '\n'
+# AI Analysis in Hindi
+print('Groq se Hindi analysis karwa raha hoon...')
 
-prompt += '\n\nProvide analysis in this EXACT format (keep it SHORT and SPECIFIC):\n\n'
-prompt += 'STRENGTHS (What is working):\n'
-prompt += '- [3 specific things that are good]\n\n'
-prompt += 'WEAKNESSES (What needs fixing):\n'
-prompt += '- [3 specific problems found in the data]\n\n'
-prompt += 'ACTION PLAN (Next 5 videos):\n'
-prompt += '1. [Specific title/format suggestion]\n'
-prompt += '2. [Specific title/format suggestion]\n'
-prompt += '3. [Specific title/format suggestion]\n\n'
-prompt += 'Tags to use: [8-10 specific tags based on what works]\n\n'
-prompt += 'Keep total response under 500 words. Be VERY specific, not generic.'
+prompt = 'Tu ek YouTube Shorts expert hai jo Hinglish (Hindi + English mix) mein baat karta hai, jaise ek bhai apne dost se baat karta hai.\n\n'
+prompt += 'Neeche ek YouTube channel ka pura data hai. Tujhe is channel ka analysis karna hai Hinglish mein.\n\n'
+prompt += raw_data + '\n\n'
+prompt += 'IMPORTANT RULES:\n'
+prompt += '1. Pura response Hinglish mein likhna (Hindi words Roman script mein, technical words English mein)\n'
+prompt += '2. Bahut specific rehna, generic advice nahi dena\n'
+prompt += '3. Emojis use karna for readability\n'
+prompt += '4. Direct "tu" use karna, "aap" nahi\n'
+prompt += '5. Under 800 words rakhna\n\n'
+prompt += 'Is format mein response dena:\n\n'
+prompt += 'BHAI, CHANNEL KA REPORT:\n'
+prompt += '[2-3 line summary - channel ki overall situation kya hai]\n\n'
+prompt += 'KYA ACHA CHAL RAHA HAI:\n'
+prompt += '- [3 specific points jo achhe hain data se]\n\n'
+prompt += 'KYA PROBLEM HAI:\n'
+prompt += '- [3 specific problems jo data mein dikh rahe hain]\n\n'
+prompt += 'FIX KYA KARNA HAI:\n'
+prompt += '1. [Specific step 1]\n'
+prompt += '2. [Specific step 2]\n'
+prompt += '3. [Specific step 3]\n\n'
+prompt += 'NEXT VIDEO KAISE BANAYE:\n'
+prompt += '- Title idea: [specific title]\n'
+prompt += '- Tags: [8-10 specific tags]\n'
+prompt += '- Duration: [kitne second]\n'
+prompt += '- Hook: [pehle 3 second mein kya dikhana]\n'
 
 ai_analysis = groq_analyze(prompt)
 
-# Send final report
+# Build final Hindi report
 final_report = 'CHANNEL ANALYSIS REPORT\n'
 final_report += '=' * 30 + '\n\n'
-final_report += report[:1500] + '\n\n'
+final_report += 'Period: Last 28 days\n'
+final_report += 'Total videos: ' + str(len(videos_with_stats)) + '\n'
+final_report += 'Total views: ' + str(total_views) + '\n'
+final_report += 'Total likes: ' + str(total_likes) + '\n\n'
+
+final_report += 'TOP 5 VIDEOS:\n'
+for i, v in enumerate(sorted_videos[:5]):
+    final_report += str(i + 1) + '. "' + v['title'][:50] + '"\n'
+    final_report += '   ' + str(v['views']) + ' views | ' + str(v['likes']) + ' likes\n'
+
+if analytics:
+    avg_retention = sum(a.get('averageViewPercentage', 0) for a in analytics) / len(analytics)
+    final_report += '\nAverage retention: ' + str(round(avg_retention, 1)) + '%\n'
+    
+    if traffic:
+        final_report += '\nTRAFFIC SOURCES:\n'
+        for t in traffic[:5]:
+            final_report += '- ' + str(t.get('insightTrafficSourceType', 'Unknown')) + ': ' + str(t.get('views', 0)) + '\n'
+
+final_report += '\n' + '=' * 30 + '\n\n'
 
 if ai_analysis:
-    final_report += 'AI ANALYSIS:\n'
-    final_report += '=' * 30 + '\n\n'
     final_report += ai_analysis
 else:
-    final_report += 'AI analysis failed. Check raw data above.'
+    final_report += 'Bhai, AI analysis fail ho gaya. Upar wala raw data dekh le.'
 
 send_telegram(final_report)
 
