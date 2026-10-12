@@ -198,20 +198,28 @@ def gen_yt_metadata(moment_text, commentary):
     prompt = 'Generate YouTube Shorts metadata for this video. This is for SEO - make it findable in search.\n\n'
     prompt += 'TRANSCRIPT: ' + moment_text[:800] + '\n\n'
     prompt += 'COMMENTARY: ' + commentary[:300] + '\n\n'
-    prompt += 'CRITICAL SEO RULES:\n'
-    prompt += '1. TITLE: Must include 2-3 HIGH-SEARCH KEYWORDS that people actually search for\n'
-    prompt += '   - Example: "Kenya Water Well", "Clean Water Project", "Rural Engineering"\n'
-    prompt += '   - NOT generic words like "Amazing", "Incredible", "Viral" alone\n'
-    prompt += '   - Must be specific to the actual content\n'
-    prompt += '2. DESCRIPTION: 2-3 lines with SEO keywords + 3-5 relevant hashtags\n'
-    prompt += '   - First line must have main keyword\n'
-    prompt += '   - End with 3-5 hashtags like #KenyaWater #CleanWater #Shorts\n'
-    prompt += '3. TAGS: 12-15 specific tags (mix of high-search and long-tail)\n'
+    prompt += 'CRITICAL RULES:\n\n'
+    prompt += '1. TITLE:\n'
+    prompt += '   - Must include 2-3 HIGH-SEARCH KEYWORDS specific to the content\n'
+    prompt += '   - Example: "Kenya Water Well Project Complete"\n'
+    prompt += '   - NOT generic words like "Amazing", "Incredible" alone\n'
+    prompt += '   - MUST END WITH EXACTLY 4 HASHTAGS: #Shorts #Viral #MrBeast #Trending\n'
+    prompt += '   - Format: "[Specific Title] #Shorts #Viral #MrBeast #Trending"\n'
+    prompt += '   - Total length under 100 chars including hashtags\n\n'
+    prompt += '2. DESCRIPTION:\n'
+    prompt += '   - Line 1: Main keyword-rich sentence (SEO)\n'
+    prompt += '   - Line 2-3: 2-3 lines describing what happens\n'
+    prompt += '   - Then a blank line\n'
+    prompt += '   - MUST INCLUDE 15-20 HASHTAGS at the end\n'
+    prompt += '   - Include these: #MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing\n'
+    prompt += '   - Add 3-5 content-specific hashtags (e.g., #KenyaWater #CleanWater)\n\n'
+    prompt += '3. TAGS:\n'
+    prompt += '   - 12-15 specific tags (comma-separated in array)\n'
     prompt += '   - Include: topic keywords, location, action words, category\n'
-    prompt += '   - Example: "kenya water well", "clean drinking water", "rural engineering", "humanitarian project", "water well construction", "african development"\n\n'
-    prompt += 'Return ONLY JSON:\n'
-    prompt += '{"title": "...", "description": "...", "tags": ["tag1", "tag2"]}'
-    result = groq_call(prompt, max_tokens=600, temp=0.4, json_mode=True)
+    prompt += '   - Example: "kenya water well", "clean drinking water", "rural engineering"\n\n'
+    prompt += 'Return ONLY valid JSON:\n'
+    prompt += '{"title": "specific title #Shorts #Viral #MrBeast #Trending", "description": "line1\\nline2\\nline3\\n\\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing #ContentTag1 #ContentTag2", "tags": ["tag1", "tag2"]}'
+    result = groq_call(prompt, max_tokens=800, temp=0.4, json_mode=True)
     if result:
         try:
             clean = result.strip()
@@ -220,13 +228,40 @@ def gen_yt_metadata(moment_text, commentary):
                 if clean.startswith('json'):
                     clean = clean[4:]
             clean = clean.strip()
-            return json.loads(clean)
+            parsed = json.loads(clean)
+            
+            # Ensure 4 hashtags in title
+            title = parsed.get('title', 'Viral Moment')
+            required_hashtags = ['#Shorts', '#Viral', '#MrBeast', '#Trending']
+            for ht in required_hashtags:
+                if ht.lower() not in title.lower():
+                    title += ' ' + ht
+            
+            # Ensure description has at least 15 hashtags
+            desc = parsed.get('description', '')
+            desc_hashtags = re.findall(r'#\w+', desc)
+            if len(desc_hashtags) < 15:
+                base_hashtags = ['#MrBeast', '#Shorts', '#Viral', '#Trending', '#YouTubeShorts', 
+                                '#ViralClip', '#USA', '#MustWatch', '#Explore', '#ShortsFeed',
+                                '#FYP', '#ViralVideo', '#TrendingNow', '#ExploreMore', '#Amazing']
+                for bh in base_hashtags:
+                    if bh.lower() not in desc.lower():
+                        desc += ' ' + bh
+                        desc_hashtags.append(bh)
+                        if len(desc_hashtags) >= 15:
+                            break
+            
+            return {
+                'title': title,
+                'description': desc,
+                'tags': parsed.get('tags', [])
+            }
         except Exception as e:
             print('Metadata parse error: ' + str(e))
     return {
-        'title': 'Viral Moment You Must See!',
-        'description': 'Watch this amazing viral moment!\n\n#Shorts #Viral',
-        'tags': ['shorts', 'viral', 'trending']
+        'title': 'Viral Moment You Must See! #Shorts #Viral #MrBeast #Trending',
+        'description': 'Watch this amazing viral moment!\n\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing',
+        'tags': ['shorts', 'viral', 'trending', 'mrbeast']
     }
 
 
@@ -328,8 +363,10 @@ def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
 
 
 def build_hook_text(title):
+    clean_title = re.sub(r'#\w+', '', title)
+    clean_title = clean_title.strip()
     stop_words = ['the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'to', 'for', 'is', 'was', 'with', 'at', 'by']
-    words = title.split()
+    words = clean_title.split()
     important_words = [w for w in words if w.lower() not in stop_words]
     hook_words = important_words[:3]
     hook_text = ' '.join(hook_words).upper()
@@ -378,12 +415,13 @@ for idx, moment in enumerate(moments):
     commentary = re.sub(r'["\'\n\r]', ' ', commentary).strip()[:300]
     print('Commentary: ' + commentary)
 
-    print('Generating metadata with SEO...')
+    print('Generating metadata with hashtags...')
     meta = gen_yt_metadata(moment_text, commentary)
     title = meta.get('title', 'Viral Moment')
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
     print('Title: ' + title)
+    print('Description: ' + description[:200])
     print('Tags: ' + tags[:200])
 
     tts_path = 'tts_%d.mp3' % idx
@@ -489,7 +527,7 @@ for idx, moment in enumerate(moments):
 
     approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
     approval_text += '📄 Title: ' + title + '\n\n'
-    approval_text += '📝 Description: ' + description + '\n\n'
+    approval_text += '📝 Description: ' + description[:300] + '...\n\n'
     approval_text += '🏷️ Tags: ' + tags[:150] + '...\n\n'
     approval_text += 'Kya karna hai?'
 
@@ -505,7 +543,7 @@ for idx, moment in enumerate(moments):
     prompt_text = '🎨 CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
     prompt_text += 'Copy this and paste in ChatGPT:\n\n'
     prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
-    prompt_text += 'VIDEO TOPIC: ' + title + '\n\n'
+    prompt_text += 'VIDEO TOPIC: ' + re.sub(r'#\w+', '', title).strip() + '\n\n'
     prompt_text += 'RULES:\n'
     prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
     prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
