@@ -1,0 +1,37 @@
+name: Jumpstyle Cat
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_id:
+        required: true
+        type: string
+      num_videos:
+        required: true
+        default: '1'
+        type: string
+      music_url:
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  gen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install requests
+      - run: python3 jumpstyle_process.py
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CHAT_ID: ${{ github.event.inputs.chat_id }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          NUM_VIDEOS: ${{ github.event.inputs.num_videos }}
+          MUSIC_URL: ${{ github.event.inputs.music_url }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
