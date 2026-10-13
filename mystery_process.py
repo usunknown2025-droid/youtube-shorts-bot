@@ -497,7 +497,7 @@ def process_one_short(topic_data, idx):
 
     print('Generating voice...')
     voice_path = 'voice_%d.mp3' % idx
-    if not gen_voice(script, voice_path):
+        if not gen_voice(script, voice_path):
         subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
                         '-t', str(DURATION), '-q:a', '9', '-acodec', 'libmp3lame', voice_path])
     voice_duration = get_audio_duration(voice_path)
@@ -523,7 +523,8 @@ def process_one_short(topic_data, idx):
     ass_path = 'captions_%d.ass' % idx
     with open(ass_path, 'w', encoding='utf-8') as f:
         f.write(build_mystery_ass(segments, voice_duration))
-            print('Rendering video...')
+
+    print('Rendering video...')
     out_path = 'mystery_short_%d.mp4' % idx
     ok = build_video_from_images(images, voice_path, voice_duration, ass_path, out_path)
 
