@@ -502,5 +502,94 @@ for idx, moment in enumerate(moments):
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
         '-F', 'chat_id=' + CHAT_ID,
         '-F', 'video=@' + out_path,
-        '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
-    ]
+                '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
+    ], capture_output=True, text=True)
+
+    file_id = None
+    try:
+        tg_json = json.loads(tg_response.stdout)
+        if tg_json.get('ok'):
+            file_id = tg_json['result']['video']['file_id']
+            print('Video File ID: ' + file_id)
+    except Exception as e:
+        print('Telegram parse error: ' + str(e))
+
+    if not file_id:
+        print('File ID not received, skipping')
+        continue
+
+    print('Saving to Supabase...')
+    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, '', TOPIC)
+    print('Supabase row ID: ' + str(row_id))
+
+    if not row_id:
+        continue
+
+    keyboard = json.dumps({
+        'inline_keyboard': [
+            [
+                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
+                {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
+            ],
+            [
+                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
+                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
+            ]
+        ]
+    })
+
+    approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
+    if TOPIC:
+        approval_text += '🎬 Topic: ' + TOPIC + '\n\n'
+    approval_text += '📄 Title: ' + title + '\n\n'
+    approval_text += '📝 Description: ' + description[:400] + '...\n\n'
+    approval_text += '🏷️ Tags: ' + tags[:300] + '...\n\n'
+    approval_text += 'Kya karna hai?'
+
+    subprocess.run([
+        'curl', '-s', '-X', 'POST',
+        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
+        '-d', 'chat_id=' + CHAT_ID,
+        '-d', 'text=' + approval_text,
+        '-d', 'parse_mode=Markdown',
+        '-d', 'reply_markup=' + keyboard
+    ])
+
+    prompt_text = '🎨 CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
+    prompt_text += 'Copy this and paste in ChatGPT:\n\n'
+    prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
+    prompt_text += 'VIDEO TOPIC: ' + re.sub(r'#\w+', '', title).strip() + '\n\n'
+    prompt_text += 'RULES:\n'
+    prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
+    prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
+    prompt_text += '3. Large EMOJI in corner (shocked face, fire, money, lightning)\n'
+    prompt_text += '4. RED CIRCLE or RED ARROW pointing to key detail\n'
+    prompt_text += '5. HIGH CONTRAST, saturated vibrant colors\n'
+    prompt_text += '6. Text readable on mobile, max 4 words\n'
+    prompt_text += '7. Format: 9:16 vertical (720x1280)\n\n'
+    prompt_text += 'GENERATE THESE 6 STYLES:\n\n'
+    prompt_text += 'STYLE 1 - Face + Big Text + Emoji\n'
+    prompt_text += 'STYLE 2 - Action Frame + Red Circle\n'
+    prompt_text += 'STYLE 3 - Face + Text + Red Arrow\n'
+    prompt_text += 'STYLE 4 - Text-Heavy + Small Face\n'
+    prompt_text += 'STYLE 5 - Before/After Split\n'
+    prompt_text += 'STYLE 6 - Dramatic Zoom + Text\n\n'
+    prompt_text += 'For each: generate image, label "Style 1", "Style 2" etc.\n'
+    prompt_text += 'Output all 6 images so I can compare and choose.'
+
+    subprocess.run([
+        'curl', '-s', '-X', 'POST',
+        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
+        '-d', 'chat_id=' + CHAT_ID,
+        '-d', 'text=' + prompt_text
+    ])
+
+    time.sleep(3)
+
+    try:
+        os.remove(tts_path)
+        os.remove(ass_path)
+    except:
+        pass
+
+print('All shorts generated and sent for approval!')
