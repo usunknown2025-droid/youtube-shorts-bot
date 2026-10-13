@@ -277,7 +277,7 @@ def download_pixabay_videos(keywords, num_videos=5):
             params = {
                 'key': PIXABAY_KEY,
                 'q': kw,
-                'per_page': 3,
+                'per_page': 5,
                 'safesearch': 'true',
                 'video_type': 'film'
             }
@@ -285,10 +285,10 @@ def download_pixabay_videos(keywords, num_videos=5):
             data = r.json()
             
             if 'hits' in data and len(data['hits']) > 0:
-                hit = data['hits'][0]
-                vid_url = hit['videos']['medium']['url']
-                videos.append({'keyword': kw, 'url': vid_url})
-                print('Found video for: ' + kw)
+                for hit in data['hits'][:2]:
+                    vid_url = hit['videos']['medium']['url']
+                    videos.append({'keyword': kw, 'url': vid_url})
+                print('Found videos for: ' + kw)
             time.sleep(0.5)
         except Exception as e:
             print('Pixabay error for ' + kw + ': ' + str(e))
@@ -417,7 +417,6 @@ def build_mystery_ass(segments, total_duration):
     return '\n'.join(lines)
 
 
-# Main execution
 print('STEP 2: Generating script for first topic')
 first_topic = topics[0] if topics else {'topic': 'The Mary Celeste', 'hook': 'A ship found empty'}
 
@@ -462,17 +461,15 @@ with open(ass_path, 'w', encoding='utf-8') as f:
     f.write(build_mystery_ass(segments, voice_duration))
 
 print('Captions ready')
-
 print('STEP 6: Rendering video...')
 out_path = 'mystery_short_0.mp4'
 
-# Build video with concatenated backgrounds + zoom + captions
 num_bg = len(video_files)
 if num_bg == 1:
     bg_input = video_files[0]
     vf = ("[0:v]scale=720:1280:force_original_aspect_ratio=increase,"
           "crop=720:1280,"
-          "zoompan=z='min(zoom+0.0008,1.15)':d=" + str(int((voice_duration + 2) * 30)) + ":s=720x1280:fps=30,"
+          "fps=30,"
           "setsar=1[vbg];"
           "[vbg]ass=" + ass_path + "[v]")
     subprocess.run([
@@ -486,22 +483,21 @@ if num_bg == 1:
         out_path
     ])
 else:
-    # Create individual clips with zoom, then concat
     clip_paths = []
     per_clip = (voice_duration + 0.5) / num_bg
     
     for i, vf_path in enumerate(video_files):
         clip = 'clip_%d.mp4' % i
-        zoom_filter = (
+        clip_filter = (
             "scale=720:1280:force_original_aspect_ratio=increase,"
             "crop=720:1280,"
-            "zoompan=z='min(zoom+0.0008,1.15)':d=" + str(int(per_clip * 30)) + ":s=720x1280:fps=30,"
+            "fps=30,"
             "setsar=1"
         )
         subprocess.run([
             'ffmpeg', '-y', '-stream_loop', '-1', '-i', vf_path,
             '-t', str(per_clip),
-            '-vf', zoom_filter,
+            '-vf', clip_filter,
             '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
             '-an',
             clip
@@ -509,7 +505,6 @@ else:
         if os.path.exists(clip):
             clip_paths.append(clip)
     
-    # Concat clips
     if clip_paths:
         with open('concat_list.txt', 'w') as f:
             for cp in clip_paths:
@@ -520,7 +515,6 @@ else:
             '-c', 'copy', 'bg_concat.mp4'
         ], capture_output=True)
         
-        # Add captions + voice
         vf = "[0:v]ass=" + ass_path + "[v]"
         subprocess.run([
             'ffmpeg', '-y', '-i', 'bg_concat.mp4', '-i', voice_path,
@@ -611,7 +605,6 @@ if file_id:
             '--data-urlencode', 'reply_markup=' + keyboard
         ], capture_output=True, text=True)
 
-# Process remaining shorts
 for idx in range(1, NUM_SHORTS):
     if idx >= len(topics):
         break
@@ -652,7 +645,7 @@ for idx in range(1, NUM_SHORTS):
     if len(video_files) == 1:
         vf = ("[0:v]scale=720:1280:force_original_aspect_ratio=increase,"
               "crop=720:1280,"
-              "zoompan=z='min(zoom+0.0008,1.15)':d=" + str(int((voice_duration + 2) * 30)) + ":s=720x1280:fps=30,"
+              "fps=30,"
               "setsar=1[vbg];"
               "[vbg]ass=" + ass_path + "[v]")
         subprocess.run([
@@ -670,13 +663,13 @@ for idx in range(1, NUM_SHORTS):
         per_clip = (voice_duration + 0.5) / len(video_files)
         for ci, vfp in enumerate(video_files):
             clip = 'clip_%d_%d.mp4' % (idx, ci)
-            zf = ("scale=720:1280:force_original_aspect_ratio=increase,"
+            cf = ("scale=720:1280:force_original_aspect_ratio=increase,"
                   "crop=720:1280,"
-                  "zoompan=z='min(zoom+0.0008,1.15)':d=" + str(int(per_clip * 30)) + ":s=720x1280:fps=30,"
+                  "fps=30,"
                   "setsar=1")
             subprocess.run([
                 'ffmpeg', '-y', '-stream_loop', '-1', '-i', vfp,
-                '-t', str(per_clip), '-vf', zf,
+                '-t', str(per_clip), '-vf', cf,
                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '26', '-an', clip
             ], capture_output=True)
             if os.path.exists(clip):
@@ -781,7 +774,6 @@ for idx in range(1, NUM_SHORTS):
     except:
         pass
 
-# Cleanup
 for vf_path in video_files:
     try:
         os.remove(vf_path)
