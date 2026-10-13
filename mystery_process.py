@@ -8,7 +8,7 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 DURATION = int(os.environ.get('DURATION', '45'))
 NUM_SHORTS = int(os.environ.get('NUM_SHORTS', '3'))
 CATEGORY = os.environ.get('CATEGORY', 'mystery')
-VOICE_NAME = os.environ.get('VOICE_NAME', 'en-US-ChristopherNeural')
+VOICE_NAME = os.environ.get('VOICE_NAME', 'en-GB-RyanNeural')
 PIXABAY_KEY = os.environ.get('PIXABAY_API_KEY', '')
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
@@ -461,14 +461,20 @@ with open(ass_path, 'w', encoding='utf-8') as f:
     f.write(build_mystery_ass(segments, voice_duration))
 
 print('Captions ready')
+
 print('STEP 6: Rendering video...')
 out_path = 'mystery_short_0.mp4'
+
+cine_filter = ("eq=contrast=1.15:saturation=1.25:brightness=0.02,"
+               "unsharp=5:5:0.8:3:3:0.4,"
+               "vignette=PI/5")
 
 num_bg = len(video_files)
 if num_bg == 1:
     bg_input = video_files[0]
     vf = ("[0:v]scale=720:1280:force_original_aspect_ratio=increase,"
           "crop=720:1280,"
+          + cine_filter + ","
           "fps=30,"
           "setsar=1[vbg];"
           "[vbg]ass=" + ass_path + "[v]")
@@ -478,7 +484,7 @@ if num_bg == 1:
         '-filter_complex', vf,
         '-map', '[v]', '-map', '1:a',
         '-t', str(voice_duration + 0.5),
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
         '-c:a', 'aac', '-b:a', '128k', '-shortest',
         out_path
     ])
@@ -491,6 +497,7 @@ else:
         clip_filter = (
             "scale=720:1280:force_original_aspect_ratio=increase,"
             "crop=720:1280,"
+            + cine_filter + ","
             "fps=30,"
             "setsar=1"
         )
@@ -498,7 +505,7 @@ else:
             'ffmpeg', '-y', '-stream_loop', '-1', '-i', vf_path,
             '-t', str(per_clip),
             '-vf', clip_filter,
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
             '-an',
             clip
         ], capture_output=True)
@@ -521,7 +528,7 @@ else:
             '-filter_complex', vf,
             '-map', '[v]', '-map', '1:a',
             '-t', str(voice_duration + 0.5),
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
             '-c:a', 'aac', '-b:a', '128k', '-shortest',
             out_path
         ])
@@ -645,6 +652,7 @@ for idx in range(1, NUM_SHORTS):
     if len(video_files) == 1:
         vf = ("[0:v]scale=720:1280:force_original_aspect_ratio=increase,"
               "crop=720:1280,"
+              + cine_filter + ","
               "fps=30,"
               "setsar=1[vbg];"
               "[vbg]ass=" + ass_path + "[v]")
@@ -654,7 +662,7 @@ for idx in range(1, NUM_SHORTS):
             '-filter_complex', vf,
             '-map', '[v]', '-map', '1:a',
             '-t', str(voice_duration + 0.5),
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
             '-c:a', 'aac', '-b:a', '128k', '-shortest',
             out_path
         ])
@@ -665,12 +673,13 @@ for idx in range(1, NUM_SHORTS):
             clip = 'clip_%d_%d.mp4' % (idx, ci)
             cf = ("scale=720:1280:force_original_aspect_ratio=increase,"
                   "crop=720:1280,"
+                  + cine_filter + ","
                   "fps=30,"
                   "setsar=1")
             subprocess.run([
                 'ffmpeg', '-y', '-stream_loop', '-1', '-i', vfp,
                 '-t', str(per_clip), '-vf', cf,
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '26', '-an', clip
+                '-c:v', 'libx264', '-preset', 'fast', '-crf', '24', '-an', clip
             ], capture_output=True)
             if os.path.exists(clip):
                 clip_paths.append(clip)
@@ -690,7 +699,7 @@ for idx in range(1, NUM_SHORTS):
                 '-filter_complex', vf,
                 '-map', '[v]', '-map', '1:a',
                 '-t', str(voice_duration + 0.5),
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+                '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
                 '-c:a', 'aac', '-b:a', '128k', '-shortest',
                 out_path
             ])
