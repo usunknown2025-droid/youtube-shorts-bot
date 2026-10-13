@@ -502,7 +502,7 @@ for idx, moment in enumerate(moments):
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
         '-F', 'chat_id=' + CHAT_ID,
         '-F', 'video=@' + out_path,
-                '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
+        '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
     ], capture_output=True, text=True)
 
     file_id = None
@@ -538,7 +538,7 @@ for idx, moment in enumerate(moments):
         ]
     })
 
-    approval_text = '📝 *Short ' + str(idx + 1) + '/' + str(len(moments)) + '*\n\n'
+    approval_text = '📝 Short ' + str(idx + 1) + '/' + str(len(moments)) + '\n\n'
     if TOPIC:
         approval_text += '🎬 Topic: ' + TOPIC + '\n\n'
     approval_text += '📄 Title: ' + title + '\n\n'
@@ -546,14 +546,15 @@ for idx, moment in enumerate(moments):
     approval_text += '🏷️ Tags: ' + tags[:300] + '...\n\n'
     approval_text += 'Kya karna hai?'
 
-    subprocess.run([
+    print('Sending approval message...')
+    approval_resp = subprocess.run([
         'curl', '-s', '-X', 'POST',
         'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
-        '-d', 'chat_id=' + CHAT_ID,
-        '-d', 'text=' + approval_text,
-        '-d', 'parse_mode=Markdown',
-        '-d', 'reply_markup=' + keyboard
-    ])
+        '--data-urlencode', 'chat_id=' + CHAT_ID,
+        '--data-urlencode', 'text=' + approval_text,
+        '--data-urlencode', 'reply_markup=' + keyboard
+    ], capture_output=True, text=True)
+    print('Approval response: ' + approval_resp.stdout[:500])
 
     prompt_text = '🎨 CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
     prompt_text += 'Copy this and paste in ChatGPT:\n\n'
