@@ -267,12 +267,12 @@ def split_script_to_segments(script, num_segments=5):
     while len(segments) < num_segments and segments:
         segments.append(segments[-1])
     return segments[:num_segments]
+    
     def ass_time(seconds):
     hrs = int(seconds // 3600)
     mins = int((seconds % 3600) // 60)
     secs = seconds % 60
     return '%d:%02d:%05.2f' % (hrs, mins, secs)
-
 
 def wrap_text(text, max_chars=20):
     words = text.split()
