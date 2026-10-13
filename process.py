@@ -503,4 +503,4 @@ for idx, moment in enumerate(moments):
         '-F', 'chat_id=' + CHAT_ID,
         '-F', 'video=@' + out_path,
         '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
-        ]
+    ]
