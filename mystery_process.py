@@ -1,4 +1,4 @@
-import json, os, requests, subprocess, time, re, asyncio
+import json, os, requests, subprocess, time, re, asyncio, urllib.parse
 from gtts import gTTS
 import edge_tts
 
@@ -9,7 +9,6 @@ DURATION = int(os.environ.get('DURATION', '45'))
 NUM_SHORTS = int(os.environ.get('NUM_SHORTS', '3'))
 CATEGORY = os.environ.get('CATEGORY', 'mystery')
 VOICE_NAME = os.environ.get('VOICE_NAME', 'en-GB-RyanNeural')
-PIXABAY_KEY = os.environ.get('PIXABAY_API_KEY', '')
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
@@ -48,7 +47,6 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
                 if content and len(content.strip()) > 5:
                     return content
                 else:
-                    print('Groq empty content')
                     time.sleep(3)
             else:
                 print('Groq response: ' + str(result)[:200])
@@ -158,9 +156,13 @@ def gen_mystery_script(topic, hook, duration_sec):
     prompt += 'Hook: ' + hook + '\n'
     prompt += 'Structure: Hook (3s) + Setup (12s) + Mystery (15s) + Twist (10s) + CTA (5s).\n'
     prompt += 'Deep dramatic tone. Short punchy sentences. End with "Follow for more mysteries!".\n'
-    prompt += 'Return JSON: {"script": "narration text here", "visual_keywords": ["kw1", "kw2", "kw3", "kw4", "kw5"]}'
+    prompt += 'Also generate 6 VISUAL SCENE descriptions for AI image generation. Each scene must be:\n'
+    prompt += '- Dark, cinematic, moody, documentary style\n'
+    prompt += '- Related to the story progression\n'
+    prompt += '- Detailed (subject, setting, lighting, atmosphere)\n'
+    prompt += 'Return JSON: {"script": "narration text", "scenes": ["scene1", "scene2", "scene3", "scene4", "scene5", "scene6"]}'
 
-    result = groq_call(prompt, max_tokens=1000, temp=0.8, json_mode=True)
+    result = groq_call(prompt, max_tokens=1200, temp=0.8, json_mode=True)
     if result:
         data = parse_json_safe(result)
         if data and data.get('script'):
@@ -168,98 +170,65 @@ def gen_mystery_script(topic, hook, duration_sec):
 
     return {
         'script': hook + '. ' + topic + ' remains one of history\'s greatest mysteries. Follow for more mysteries!',
-        'visual_keywords': ['mystery', 'dark', 'ocean', 'fog', 'shadow']
+        'scenes': [
+            'dark abandoned ship in foggy ocean at night, cinematic',
+            'old wooden deck of ship, moonlight, eerie atmosphere',
+            'empty captain cabin, dusty, dark, cinematic',
+            'storm clouds over ocean, dramatic lighting',
+            'ship silhouette in heavy fog, mysterious',
+            'dark horizon fading into night, ominous, cinematic'
+        ]
     }
 
 
-def gen_yt_metadata(topic, script):
-    prompt = 'Generate YouTube Shorts metadata for a mystery short.\n'
-    prompt += 'Topic: ' + topic + '\n'
-    prompt += 'Script: ' + script[:400] + '\n'
-    prompt += 'Rules:\n'
-    prompt += '- Title: Specific topic name + end with "#Shorts #Viral #MrBeast #Trending"\n'
-    prompt += '- Description: 2 lines about mystery + blank + 15-20 hashtags (include #MrBeast #Shorts #Viral #Trending #YouTubeShorts #Mystery #Unsolved)\n'
-    prompt += '- Tags: minimum 15 specific tags\n'
-    prompt += 'Return JSON: {"title": "...", "description": "...", "tags": ["tag1", "tag2"]}'
-
-    result = groq_call(prompt, max_tokens=900, temp=0.5, json_mode=True)
-    if result:
-        parsed = parse_json_safe(result)
-        if parsed:
-            title = parsed.get('title', topic)
-            required = ['#Shorts', '#Viral', '#MrBeast', '#Trending']
-            title_hashtags = re.findall(r'#\w+', title)
-            for ht in required:
-                if ht.lower() not in [t.lower() for t in title_hashtags]:
-                    title = title.rstrip() + ' ' + ht
-
-            desc = parsed.get('description', '')
-            desc_hashtags = re.findall(r'#\w+', desc)
-            if len(desc_hashtags) < 15:
-                base = ['#MrBeast', '#Shorts', '#Viral', '#Trending', '#YouTubeShorts',
-                        '#ViralClip', '#USA', '#MustWatch', '#Explore', '#ShortsFeed',
-                        '#FYP', '#ViralVideo', '#TrendingNow', '#ExploreMore', '#Amazing',
-                        '#Mystery', '#Unsolved', '#Unexplained']
-                for bh in base:
-                    if bh.lower() not in [h.lower() for h in desc_hashtags]:
-                        desc += '\n' + bh
-                        desc_hashtags.append(bh)
-                        if len(desc_hashtags) >= 15:
-                            break
-
-            tags = parsed.get('tags', [])
-            if len(tags) < 15:
-                base_tags = ['mystery', 'unsolved', 'unexplained', 'shorts', 'viral',
-                             'mrbeast', 'trending', 'youtube shorts', 'must watch', 'history',
-                             'documentary', 'creepy', 'paranormal', 'haunted', 'ghost']
-                for bt in base_tags:
-                    if bt not in tags and len(tags) < 15:
-                        tags.append(bt)
-
-            return {'title': title, 'description': desc, 'tags': tags}
-
-    return {
-        'title': topic + ' #Shorts #Viral #MrBeast #Trending',
-        'description': topic + ' remains one of history\'s greatest unsolved mysteries!\n\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing #Mystery #Unsolved',
-        'tags': ['mystery', 'unsolved', 'unexplained', 'shorts', 'viral', 'mrbeast', 'trending', 'youtube shorts', 'must watch', 'history', 'documentary', 'creepy', 'paranormal', 'haunted', 'ghost']
-    }
-
-
-def download_pixabay_videos(keywords, num_videos=3):
-    if not PIXABAY_KEY:
-        print('No Pixabay key')
-        return []
-
-    videos = []
-    for kw in keywords[:num_videos]:
-        try:
-            url = 'https://pixabay.com/api/videos/'
-            params = {'key': PIXABAY_KEY, 'q': kw, 'per_page': 3, 'safesearch': 'true', 'video_type': 'film'}
-            r = requests.get(url, params=params, timeout=30)
-            data = r.json()
-            if 'hits' in data and len(data['hits']) > 0:
-                hit = data['hits'][0]
-                vid_url = hit['videos']['medium']['url']
-                videos.append({'keyword': kw, 'url': vid_url})
-                print('Found: ' + kw)
-            time.sleep(0.5)
-        except Exception as e:
-            print('Pixabay error ' + kw + ': ' + str(e))
-    return videos
-
-
-def download_video_file(url, output_path):
+def gen_ai_image(scene_description, output_path, seed=42):
     try:
-        r = requests.get(url, timeout=120, stream=True)
-        if r.status_code == 200:
+        cinematic_prompt = (
+            scene_description + ', ' +
+            'dark cinematic documentary style, moody atmospheric lighting, ' +
+            'deep shadows, film grain, 1800s historical aesthetic, ' +
+            'realistic, ultra detailed, 8k, dramatic composition, ' +
+            'masterpiece, cinematic color grading'
+        )
+        encoded = urllib.parse.quote(cinematic_prompt)
+        url = 'https://image.pollinations.ai/prompt/' + encoded
+        url += '?width=720&height=1280&model=flux&nologo=true&seed=' + str(seed) + '&enhance=true'
+
+        print('Generating image: ' + scene_description[:60])
+        r = requests.get(url, timeout=180)
+        if r.status_code == 200 and len(r.content) > 5000:
             with open(output_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            if os.path.exists(output_path) and os.path.getsize(output_path) > 10000:
+                f.write(r.content)
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 5000:
                 return True
+        print('Image gen failed: status ' + str(r.status_code) + ', size ' + str(len(r.content)))
     except Exception as e:
-        print('Download error: ' + str(e))
+        print('Image error: ' + str(e))
     return False
+
+
+def gen_scene_images(scenes, topic):
+    images = []
+    for i, scene in enumerate(scenes[:6]):
+        path = 'scene_%d.jpg' % i
+        seed = 42 + i * 111
+        if gen_ai_image(scene, path, seed):
+            images.append(path)
+            print('Image ' + str(i+1) + ' ready: ' + path)
+        time.sleep(3)
+        if len(images) >= 6:
+            break
+
+    while len(images) < 3:
+        fallback_scene = topic + ', dark mysterious cinematic scene ' + str(len(images)+1)
+        path = 'scene_fb_%d.jpg' % len(images)
+        if gen_ai_image(fallback_scene, path, 999 + len(images)):
+            images.append(path)
+        else:
+            break
+        time.sleep(3)
+
+    return images
 
 
 def gen_voice(script, output_path):
@@ -298,9 +267,7 @@ def split_script_to_segments(script, num_segments=5):
     while len(segments) < num_segments and segments:
         segments.append(segments[-1])
     return segments[:num_segments]
-
-
-def ass_time(seconds):
+    def ass_time(seconds):
     hrs = int(seconds // 3600)
     mins = int((seconds % 3600) // 60)
     secs = seconds % 60
@@ -366,139 +333,181 @@ def build_mystery_ass(segments, total_duration):
     return '\n'.join(lines)
 
 
-print('STEP 2: Generating script')
-first_topic = topics[0] if topics else {'topic': 'The Mary Celeste', 'hook': 'A ship found empty'}
+def make_kenburns_clip(image_path, clip_duration, output_path, direction='in'):
+    fps = 30
+    total_frames = int(clip_duration * fps)
+    if total_frames < 30:
+        total_frames = 30
 
-script_data = gen_mystery_script(first_topic['topic'], first_topic['hook'], DURATION)
-script = script_data.get('script', '')
-visual_keywords = script_data.get('visual_keywords', ['mystery', 'dark', 'ocean'])
-print('Script: ' + script[:150])
+    if direction == 'in':
+        z_expr = "min(1+0.0015*on,1.35)"
+    elif direction == 'out':
+        z_expr = "max(1.35-0.0015*on,1.0)"
+    else:
+        z_expr = "min(1+0.0012*on,1.3)"
 
-print('STEP 3: Generating voice')
-voice_path = 'voice.mp3'
-if not gen_voice(script, voice_path):
-    subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-                    '-t', str(DURATION), '-q:a', '9', '-acodec', 'libmp3lame', voice_path])
+    cine = ("eq=contrast=1.15:saturation=1.25:brightness=0.02,"
+            "unsharp=5:5:0.8:3:3:0.4,"
+            "vignette=PI/5")
 
-voice_duration = get_audio_duration(voice_path)
-print('Voice duration: %0.2f seconds' % voice_duration)
+    vf = (
+        "scale=1440:2560:force_original_aspect_ratio=increase,"
+        "crop=1440:2560,"
+        "zoompan=z='" + z_expr + "':d=" + str(total_frames) + ":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=720x1280:fps=" + str(fps) + ","
+        + cine + ","
+        "fps=30,setsar=1,format=yuv420p"
+    )
 
-print('STEP 4: Downloading videos')
-videos = download_pixabay_videos(visual_keywords, 3)
-print('Downloaded ' + str(len(videos)) + ' videos')
+    r = subprocess.run([
+        'ffmpeg', '-y', '-loop', '1', '-i', image_path,
+        '-t', str(clip_duration),
+        '-vf', vf,
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
+        '-pix_fmt', 'yuv420p',
+        '-an',
+        output_path
+    ], capture_output=True, text=True)
+    if r.returncode != 0:
+        print('KenBurns error: ' + r.stderr[-300:])
+    return os.path.exists(output_path)
 
-video_files = []
-for i, v in enumerate(videos):
-    path = 'bg_%d.mp4' % i
-    if download_video_file(v['url'], path):
-        video_files.append(path)
-        print('Saved: ' + path)
 
-if not video_files:
-    print('No videos - fallback black background')
-    subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'color=c=0x000000:s=720x1280:d=' + str(voice_duration + 2) + ':r=30',
-                    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', 'bg_fallback.mp4'])
-    video_files = ['bg_fallback.mp4']
+def build_video_from_images(images, voice_path, voice_duration, ass_path, output_path):
+    total_dur = voice_duration + 0.5
+    n_images = len(images)
+    if n_images == 0:
+        return False
 
-print('STEP 5: Building captions')
-segments = split_script_to_segments(script, 5)
-ass_path = 'captions.ass'
-with open(ass_path, 'w', encoding='utf-8') as f:
-    f.write(build_mystery_ass(segments, voice_duration))
+    per_image = total_dur / n_images
+    directions = ['in', 'out', 'in', 'out', 'in', 'out', 'in', 'out']
 
-print('Captions ready')
-print('STEP 6: Rendering video...')
-out_path = 'mystery_short_0.mp4'
+    clip_paths = []
+    for i, img in enumerate(images):
+        clip = 'kb_%d.mp4' % i
+        direction = directions[i % len(directions)]
+        if make_kenburns_clip(img, per_image, clip, direction):
+            clip_paths.append(clip)
+            print('Ken Burns clip ' + str(i+1) + ' done')
 
-cine_filter = ("eq=contrast=1.15:saturation=1.25:brightness=0.02,"
-               "unsharp=5:5:0.8:3:3:0.4,"
-               "vignette=PI/5")
+    if not clip_paths:
+        return False
 
-num_bg = len(video_files)
-if num_bg == 1:
-    vf = ("[0:v]scale=720:1280:force_original_aspect_ratio=increase,"
-          "crop=720:1280,"
-          + cine_filter + ","
-          "fps=30,setsar=1[vbg];"
-          "[vbg]ass=" + ass_path + "[v]")
+    with open('kb_list.txt', 'w') as f:
+        for cp in clip_paths:
+            f.write("file '" + os.path.abspath(cp) + "'\n")
+
     subprocess.run([
-        'ffmpeg', '-y', '-stream_loop', '-1', '-i', video_files[0],
-        '-i', voice_path,
+        'ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'kb_list.txt',
+        '-c', 'copy', 'kb_concat.mp4'
+    ], capture_output=True)
+
+    vf = "[0:v]ass=" + ass_path + "[v]"
+    r = subprocess.run([
+        'ffmpeg', '-y', '-i', 'kb_concat.mp4', '-i', voice_path,
         '-filter_complex', vf,
         '-map', '[v]', '-map', '1:a',
-        '-t', str(voice_duration + 0.5),
+        '-t', str(total_dur),
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
-        '-c:a', 'aac', '-b:a', '128k', '-shortest',
-        out_path
-    ])
-else:
-    clip_paths = []
-    per_clip = (voice_duration + 0.5) / num_bg
-    for i, vf_path in enumerate(video_files):
-        clip = 'clip_%d.mp4' % i
-        cf = ("scale=720:1280:force_original_aspect_ratio=increase,"
-              "crop=720:1280," + cine_filter + ",fps=30,setsar=1")
-        subprocess.run([
-            'ffmpeg', '-y', '-stream_loop', '-1', '-i', vf_path,
-            '-t', str(per_clip), '-vf', cf,
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '24', '-an', clip
-        ], capture_output=True)
-        if os.path.exists(clip):
-            clip_paths.append(clip)
+        '-c:a', 'aac', '-b:a', '128k',
+        '-shortest',
+        output_path
+    ], capture_output=True, text=True)
 
-    if clip_paths:
-        with open('concat_list.txt', 'w') as f:
-            for cp in clip_paths:
-                f.write("file '" + os.path.abspath(cp) + "'\n")
-        subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'concat_list.txt',
-                        '-c', 'copy', 'bg_concat.mp4'], capture_output=True)
-        vf = "[0:v]ass=" + ass_path + "[v]"
-        subprocess.run([
-            'ffmpeg', '-y', '-i', 'bg_concat.mp4', '-i', voice_path,
-            '-filter_complex', vf,
-            '-map', '[v]', '-map', '1:a',
-            '-t', str(voice_duration + 0.5),
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
-            '-c:a', 'aac', '-b:a', '128k', '-shortest',
-            out_path
-        ])
-        for cp in clip_paths:
-            try: os.remove(cp)
-            except: pass
-        try:
-            os.remove('bg_concat.mp4')
-            os.remove('concat_list.txt')
+    if r.returncode != 0:
+        print('Final render error: ' + r.stderr[-300:])
+
+    for cp in clip_paths:
+        try: os.remove(cp)
         except: pass
+    try:
+        os.remove('kb_concat.mp4')
+        os.remove('kb_list.txt')
+    except: pass
 
-print('Rendered: ' + out_path)
+    return os.path.exists(output_path)
 
-print('STEP 7: Metadata')
-meta = gen_yt_metadata(first_topic['topic'], script)
-title = meta.get('title', first_topic['topic'])
-description = meta.get('description', '')
-tags = ', '.join(meta.get('tags', []))
-print('Title: ' + title)
 
-print('STEP 8: Sending to Telegram')
-tg_response = subprocess.run([
-    'curl', '-s', '-X', 'POST',
-    'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
-    '-F', 'chat_id=' + CHAT_ID,
-    '-F', 'video=@' + out_path,
-    '-F', 'caption=Mystery Short 1/' + str(NUM_SHORTS) + ' - ' + first_topic['topic']
-], capture_output=True, text=True)
+def process_one_short(topic_data, idx):
+    topic = topic_data['topic']
+    hook = topic_data['hook']
+    print('=== SHORT ' + str(idx+1) + ': ' + topic + ' ===')
 
-file_id = None
-try:
-    tg_json = json.loads(tg_response.stdout)
-    if tg_json.get('ok'):
-        file_id = tg_json['result']['video']['file_id']
-        print('File ID: ' + file_id)
-except Exception as e:
-    print('Telegram error: ' + str(e))
+    print('Generating script + scenes...')
+    script_data = gen_mystery_script(topic, hook, DURATION)
+    script = script_data.get('script', '')
+    scenes = script_data.get('scenes', [])
+    print('Script: ' + script[:150])
+    print('Scenes: ' + str(len(scenes)))
 
-if file_id:
-    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, 1,
+    print('Generating voice...')
+    voice_path = 'voice_%d.mp3' % idx
+    if not gen_voice(script, voice_path):
+        subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+                        '-t', str(DURATION), '-q:a', '9', '-acodec', 'libmp3lame', voice_path])
+    voice_duration = get_audio_duration(voice_path)
+    print('Voice duration: %0.2f s' % voice_duration)
+
+    print('Generating AI images...')
+    images = gen_scene_images(scenes, topic)
+    print('Images ready: ' + str(len(images)))
+
+    if len(images) < 2:
+        print('Not enough images, using fallback')
+        for i in range(3):
+            fb_path = 'scene_fb_final_%d.jpg' % i
+            if gen_ai_image(topic + ', dark mysterious cinematic atmosphere ' + str(i+1), fb_path, 777+i):
+                images.append(fb_path)
+
+    if not images:
+        print('No images at all, skipping short')
+        return None
+
+    print('Building captions...')
+    segments = split_script_to_segments(script, len(images))
+    ass_path = 'captions_%d.ass' % idx
+    with open(ass_path, 'w', encoding='utf-8') as f:
+        f.write(build_mystery_ass(segments, voice_duration))
+
+    print('Rendering video...')
+    out_path = 'mystery_short_%d.mp4' % idx
+    ok = build_video_from_images(images, voice_path, voice_duration, ass_path, out_path)
+
+    if not ok:
+        print('Video render failed for short ' + str(idx+1))
+        return None
+
+    print('Video rendered: ' + out_path)
+
+    print('Generating metadata...')
+    meta = gen_yt_metadata(topic, script)
+    title = meta.get('title', topic)
+    description = meta.get('description', '')
+    tags = ', '.join(meta.get('tags', []))
+    print('Title: ' + title)
+
+    print('Sending to Telegram...')
+    tg_response = subprocess.run([
+        'curl', '-s', '-X', 'POST',
+        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
+        '-F', 'chat_id=' + CHAT_ID,
+        '-F', 'video=@' + out_path,
+        '-F', 'caption=Mystery Short ' + str(idx+1) + '/' + str(NUM_SHORTS) + ' - ' + topic
+    ], capture_output=True, text=True)
+
+    file_id = None
+    try:
+        tg_json = json.loads(tg_response.stdout)
+        if tg_json.get('ok'):
+            file_id = tg_json['result']['video']['file_id']
+            print('File ID: ' + file_id)
+    except Exception as e:
+        print('Telegram parse error: ' + str(e))
+
+    if not file_id:
+        return None
+
+    print('Saving to Supabase...')
+    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx+1,
                               content_type='mystery', script=script, voice_style=VOICE_NAME)
     print('Row ID: ' + str(row_id))
 
@@ -511,8 +520,8 @@ if file_id:
                  {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}]
             ]
         })
-        approval_text = '📝 Mystery Short 1/' + str(NUM_SHORTS) + '\n\n'
-        approval_text += '🎬 Topic: ' + first_topic['topic'] + '\n\n'
+        approval_text = '📝 Mystery Short ' + str(idx+1) + '/' + str(NUM_SHORTS) + '\n\n'
+        approval_text += '🎬 Topic: ' + topic + '\n\n'
         approval_text += '📄 Title: ' + title + '\n\n'
         approval_text += '📝 Description: ' + description[:400] + '...\n\n'
         approval_text += '🏷️ Tags: ' + tags[:300] + '...\n\n'
@@ -525,142 +534,28 @@ if file_id:
             '--data-urlencode', 'reply_markup=' + keyboard
         ], capture_output=True, text=True)
 
-for idx in range(1, NUM_SHORTS):
-    if idx >= len(topics):
+    try:
+        os.remove(voice_path)
+        os.remove(ass_path)
+    except: pass
+    for img in images:
+        try: os.remove(img)
+        except: pass
+    try: os.remove(out_path)
+    except: pass
+
+    return row_id
+
+
+# MAIN EXECUTION
+for i in range(NUM_SHORTS):
+    if i >= len(topics):
         break
     try:
-        topic_data = topics[idx]
-        print('Short ' + str(idx + 1) + ': ' + topic_data['topic'])
-
-        script_data = gen_mystery_script(topic_data['topic'], topic_data['hook'], DURATION)
-        script = script_data.get('script', '')
-        visual_keywords = script_data.get('visual_keywords', ['mystery', 'dark'])
-
-        voice_path = 'voice_%d.mp3' % idx
-        if not gen_voice(script, voice_path):
-            subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-                            '-t', str(DURATION), '-q:a', '9', '-acodec', 'libmp3lame', voice_path])
-        voice_duration = get_audio_duration(voice_path)
-
-        videos = download_pixabay_videos(visual_keywords, 3)
-        video_files = []
-        for vi, v in enumerate(videos):
-            path = 'bg_%d_%d.mp4' % (idx, vi)
-            if download_video_file(v['url'], path):
-                video_files.append(path)
-
-        if not video_files:
-            subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'color=c=0x000000:s=720x1280:d=' + str(voice_duration + 2) + ':r=30',
-                            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', 'bg_fb_%d.mp4' % idx])
-            video_files = ['bg_fb_%d.mp4' % idx]
-
-        segments = split_script_to_segments(script, 5)
-        ass_path = 'captions_%d.ass' % idx
-        with open(ass_path, 'w', encoding='utf-8') as f:
-            f.write(build_mystery_ass(segments, voice_duration))
-
-        out_path = 'mystery_short_%d.mp4' % idx
-
-        if len(video_files) == 1:
-            vf = ("[0:v]scale=720:1280:force_original_aspect_ratio=increase,"
-                  "crop=720:1280," + cine_filter + ",fps=30,setsar=1[vbg];"
-                  "[vbg]ass=" + ass_path + "[v]")
-            subprocess.run([
-                'ffmpeg', '-y', '-stream_loop', '-1', '-i', video_files[0],
-                '-i', voice_path, '-filter_complex', vf,
-                '-map', '[v]', '-map', '1:a',
-                '-t', str(voice_duration + 0.5),
-                '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
-                '-c:a', 'aac', '-b:a', '128k', '-shortest', out_path
-            ])
-        else:
-            clip_paths = []
-            per_clip = (voice_duration + 0.5) / len(video_files)
-            for ci, vfp in enumerate(video_files):
-                clip = 'clip_%d_%d.mp4' % (idx, ci)
-                cf = ("scale=720:1280:force_original_aspect_ratio=increase,"
-                      "crop=720:1280," + cine_filter + ",fps=30,setsar=1")
-                subprocess.run(['ffmpeg', '-y', '-stream_loop', '-1', '-i', vfp,
-                                '-t', str(per_clip), '-vf', cf,
-                                '-c:v', 'libx264', '-preset', 'fast', '-crf', '24', '-an', clip],
-                               capture_output=True)
-                if os.path.exists(clip):
-                    clip_paths.append(clip)
-            if clip_paths:
-                with open('cc_%d.txt' % idx, 'w') as f:
-                    for cp in clip_paths:
-                        f.write("file '" + os.path.abspath(cp) + "'\n")
-                subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'cc_%d.txt' % idx,
-                                '-c', 'copy', 'bgc_%d.mp4' % idx], capture_output=True)
-                vf = "[0:v]ass=" + ass_path + "[v]"
-                subprocess.run(['ffmpeg', '-y', '-i', 'bgc_%d.mp4' % idx, '-i', voice_path,
-                                '-filter_complex', vf,
-                                '-map', '[v]', '-map', '1:a',
-                                '-t', str(voice_duration + 0.5),
-                                '-c:v', 'libx264', '-preset', 'fast', '-crf', '24',
-                                '-c:a', 'aac', '-b:a', '128k', '-shortest', out_path])
-                for cp in clip_paths:
-                    try: os.remove(cp)
-                    except: pass
-                try:
-                    os.remove('bgc_%d.mp4' % idx)
-                    os.remove('cc_%d.txt' % idx)
-                except: pass
-
-        meta = gen_yt_metadata(topic_data['topic'], script)
-        title = meta.get('title', topic_data['topic'])
-        description = meta.get('description', '')
-        tags = ', '.join(meta.get('tags', []))
-
-        tg_response = subprocess.run([
-            'curl', '-s', '-X', 'POST',
-            'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
-            '-F', 'chat_id=' + CHAT_ID,
-            '-F', 'video=@' + out_path,
-            '-F', 'caption=Mystery Short ' + str(idx + 1) + '/' + str(NUM_SHORTS) + ' - ' + topic_data['topic']
-        ], capture_output=True, text=True)
-
-        file_id = None
-        try:
-            tg_json = json.loads(tg_response.stdout)
-            if tg_json.get('ok'):
-                file_id = tg_json['result']['video']['file_id']
-        except: pass
-
-        if file_id:
-            row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1,
-                                      content_type='mystery', script=script, voice_style=VOICE_NAME)
-            if row_id:
-                keyboard = json.dumps({
-                    'inline_keyboard': [
-                        [{'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
-                         {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}],
-                        [{'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
-                         {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}]
-                    ]
-                })
-                approval_text = '📝 Mystery Short ' + str(idx + 1) + '/' + str(NUM_SHORTS) + '\n\n'
-                approval_text += '🎬 Topic: ' + topic_data['topic'] + '\n\n'
-                approval_text += '📄 Title: ' + title + '\n\n'
-                approval_text += '📝 Description: ' + description[:400] + '...\n\n'
-                approval_text += '🏷️ Tags: ' + tags[:300] + '...\n\n'
-                approval_text += 'Kya karna hai?'
-                subprocess.run(['curl', '-s', '-X', 'POST',
-                                'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
-                                '--data-urlencode', 'chat_id=' + CHAT_ID,
-                                '--data-urlencode', 'text=' + approval_text,
-                                '--data-urlencode', 'reply_markup=' + keyboard], capture_output=True, text=True)
-
-        time.sleep(2)
-        try:
-            os.remove(voice_path)
-            os.remove(ass_path)
-        except: pass
-        for vf_path in video_files:
-            try: os.remove(vf_path)
-            except: pass
+        process_one_short(topics[i], i)
     except Exception as e:
-        print('Short ' + str(idx + 1) + ' failed: ' + str(e))
+        print('Short ' + str(i+1) + ' failed: ' + str(e))
         continue
+    time.sleep(3)
 
 print('All mystery shorts generated!')
