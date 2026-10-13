@@ -7,6 +7,7 @@ CHAT_ID = os.environ.get('CHAT_ID', '')
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 DURATION = int(os.environ.get('DURATION', '45'))
 NUM_SHORTS = int(os.environ.get('NUM_SHORTS', '3'))
+TOPIC = os.environ.get('TOPIC', '')
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
@@ -58,7 +59,7 @@ def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
     return None
 
 
-def save_to_supabase(chat_id, file_id, title, description, tags, short_number, thumbnail_urls=''):
+def save_to_supabase(chat_id, file_id, title, description, tags, short_number, thumbnail_urls='', topic=''):
     url = SUPABASE_URL + '/rest/v1/pending_shorts'
     headers = {
         'apikey': SUPABASE_KEY,
@@ -75,7 +76,8 @@ def save_to_supabase(chat_id, file_id, title, description, tags, short_number, t
         'status': 'pending',
         'short_number': short_number,
         'upload_status': 'pending',
-        'thumbnail_urls': thumbnail_urls
+        'thumbnail_urls': thumbnail_urls,
+        'topic': topic
     }
     try:
         r = requests.post(url, headers=headers, json=data, timeout=30)
@@ -89,6 +91,7 @@ def save_to_supabase(chat_id, file_id, title, description, tags, short_number, t
     return None
 
 
+print('TOPIC: ' + TOPIC)
 print('STEP 1: Whisper Transcription')
 model = WhisperModel('tiny', device='cpu', compute_type='int8')
 segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
@@ -196,6 +199,9 @@ def gen_commentary(moment_text):
 
 def gen_yt_metadata(moment_text, commentary):
     prompt = 'You are a YouTube Shorts SEO expert. Analyze the ACTUAL content and generate metadata.\n\n'
+    if TOPIC:
+        prompt += 'USER PROVIDED TOPIC: ' + TOPIC + '\n'
+        prompt += '(Use this topic as context for better metadata)\n\n'
     prompt += '=== VIDEO CONTENT ===\n'
     prompt += 'TRANSCRIPT: ' + moment_text[:1500] + '\n\n'
     prompt += 'COMMENTARY: ' + commentary[:300] + '\n\n'
@@ -209,10 +215,6 @@ def gen_yt_metadata(moment_text, commentary):
     prompt += '- GOOD EXAMPLES:\n'
     prompt += '  * "Woman Finds $10,000 in Old Suitcase #Shorts #Viral #MrBeast #Trending"\n'
     prompt += '  * "Cheetah Chases Gazelle at Full Speed #Shorts #Viral #MrBeast #Trending"\n'
-    prompt += '  * "Man Builds Water Well in Kenya #Shorts #Viral #MrBeast #Trending"\n'
-    prompt += '- BAD EXAMPLES (do not do this):\n'
-    prompt += '  * "Viral Moment You Must See"\n'
-    prompt += '  * "Amazing Video"\n'
     prompt += '- MUST end with EXACTLY these 4 hashtags: #Shorts #Viral #MrBeast #Trending\n'
     prompt += '- Total under 100 chars\n\n'
     prompt += 'DESCRIPTION RULES:\n'
@@ -221,15 +223,12 @@ def gen_yt_metadata(moment_text, commentary):
     prompt += '- Then blank line\n'
     prompt += '- Then 15-20 hashtags on separate lines\n'
     prompt += '- MUST include these: #MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing\n'
-    prompt += '- PLUS 3-5 content-specific hashtags (e.g., #KenyaWater #CleanWater)\n\n'
+    prompt += '- PLUS 3-5 content-specific hashtags\n\n'
     prompt += 'TAGS RULES:\n'
     prompt += '- MUST be 15 tags minimum (JSON array of strings)\n'
-    prompt += '- Each tag must be SPECIFIC to the content (nouns, actions, locations)\n'
-    prompt += '- Include: subject, action, location, category\n'
-    prompt += '- Example for basketball video: ["basketball", "clutch shot", "nba", "sports", "game winner", "last second", "amazing shot", "viral basketball", "shorts", "trending", "viral", "mrbeast", "sports highlights", "buzzer beater", "athlete"]\n'
-    prompt += '- Do NOT include just generic: "shorts", "viral", "trending" — must have content-specific ones\n\n'
+    prompt += '- Each tag must be SPECIFIC to the content (nouns, actions, locations)\n\n'
     prompt += 'Return ONLY valid JSON (no markdown):\n'
-    prompt += '{"title": "...", "description": "...", "tags": ["tag1", "tag2", "tag3", "...15 tags minimum..."]}'
+    prompt += '{"title": "...", "description": "...", "tags": ["tag1", "tag2", "...15 tags minimum..."]}'
     
     result = groq_call(prompt, max_tokens=1200, temp=0.5, json_mode=True)
     if result:
@@ -243,7 +242,6 @@ def gen_yt_metadata(moment_text, commentary):
             parsed = json.loads(clean)
             
             title = parsed.get('title', 'Viral Moment')
-            
             required = ['#Shorts', '#Viral', '#MrBeast', '#Trending']
             title_hashtags = re.findall(r'#\w+', title)
             for ht in required:
@@ -271,11 +269,7 @@ def gen_yt_metadata(moment_text, commentary):
                     if bt not in tags:
                         tags.append(bt)
             
-            return {
-                'title': title,
-                'description': desc,
-                'tags': tags
-            }
+            return {'title': title, 'description': desc, 'tags': tags}
         except Exception as e:
             print('Metadata parse error: ' + str(e))
     
@@ -442,8 +436,6 @@ for idx, moment in enumerate(moments):
     description = meta.get('description', '')
     tags = ', '.join(meta.get('tags', []))
     print('Title: ' + title)
-    print('Description: ' + description[:200])
-    print('Tags: ' + tags[:200])
 
     tts_path = 'tts_%d.mp3' % idx
     if not gen_tts(commentary, tts_path):
@@ -491,4 +483,24 @@ for idx, moment in enumerate(moments):
     subprocess.run([
         'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
         '-i', 'video.mp4', '-i', tts_path,
-        '-loop', '1', '-t', str(tts_dur), '-
+        '-loop', '1', '-t', str(tts_dur), '-i', hook_frame,
+        '-filter_complex', vf + ';' + af,
+        '-map', '[v]', '-map', '[aout]',
+        '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
+        '-c:a', 'aac', '-b:a', '128k',
+        out_path
+    ])
+
+    try:
+        os.remove(hook_frame)
+    except:
+        pass
+
+    print('Sending video to Telegram...')
+    tg_response = subprocess.run([
+        'curl', '-s', '-X', 'POST',
+        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
+        '-F', 'chat_id=' + CHAT_ID,
+        '-F', 'video=@' + out_path,
+        '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
+        ]
