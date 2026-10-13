@@ -26,6 +26,11 @@ on:
         required: true
         default: '3'
         type: string
+      topic:
+        description: 'Video Topic (optional)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   download:
@@ -85,6 +90,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           DURATION: ${{ github.event.inputs.duration }}
           NUM_SHORTS: ${{ github.event.inputs.num_shorts }}
+          TOPIC: ${{ github.event.inputs.topic }}
           YT_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
