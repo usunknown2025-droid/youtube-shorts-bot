@@ -117,8 +117,8 @@ print('MYSTERY SHORTS GENERATOR')
 print('Category: ' + CATEGORY)
 print('Voice: ' + VOICE_NAME)
 
-
 print('STEP 1: Generate Mystery Topics')
+
 category_topics = {
     'aliens': 'alien encounter, UFO sighting, area 51, extraterrestrial',
     'ghosts': 'haunted house, ghost sighting, poltergeist, paranormal activity',
@@ -134,6 +134,7 @@ topics_prompt += 'Each topic must be SPECIFIC (real event/place), UNSOLVED, SHOC
 topics_prompt += 'Return JSON: {"topics": [{"topic": "name", "hook": "grabber"}]}'
 
 result = groq_call(topics_prompt, max_tokens=800, temp=0.7, json_mode=True)
+
 topics = []
 if result:
     data = parse_json_safe(result)
@@ -267,12 +268,14 @@ def split_script_to_segments(script, num_segments=5):
     while len(segments) < num_segments and segments:
         segments.append(segments[-1])
     return segments[:num_segments]
-    
-    def ass_time(seconds):
+
+
+def ass_time(seconds):
     hrs = int(seconds // 3600)
     mins = int((seconds % 3600) // 60)
     secs = seconds % 60
     return '%d:%02d:%05.2f' % (hrs, mins, secs)
+
 
 def wrap_text(text, max_chars=20):
     words = text.split()
@@ -427,6 +430,59 @@ def build_video_from_images(images, voice_path, voice_duration, ass_path, output
     return os.path.exists(output_path)
 
 
+def gen_yt_metadata(topic, script):
+    prompt = 'Generate YouTube Shorts metadata for a mystery short.\n'
+    prompt += 'Topic: ' + topic + '\n'
+    prompt += 'Script: ' + script[:400] + '\n'
+    prompt += 'Rules:\n'
+    prompt += '- Title: Specific topic name + end with "#Shorts #Viral #MrBeast #Trending"\n'
+    prompt += '- Description: 2 lines about mystery + blank + 15-20 hashtags (include #MrBeast #Shorts #Viral #Trending #YouTubeShorts #Mystery #Unsolved)\n'
+    prompt += '- Tags: minimum 15 specific tags\n'
+    prompt += 'Return JSON: {"title": "...", "description": "...", "tags": ["tag1", "tag2"]}'
+
+    result = groq_call(prompt, max_tokens=900, temp=0.5, json_mode=True)
+    if result:
+        parsed = parse_json_safe(result)
+        if parsed:
+            title = parsed.get('title', topic)
+            required = ['#Shorts', '#Viral', '#MrBeast', '#Trending']
+            title_hashtags = re.findall(r'#\w+', title)
+            for ht in required:
+                if ht.lower() not in [t.lower() for t in title_hashtags]:
+                    title = title.rstrip() + ' ' + ht
+
+            desc = parsed.get('description', '')
+            desc_hashtags = re.findall(r'#\w+', desc)
+            if len(desc_hashtags) < 15:
+                base = ['#MrBeast', '#Shorts', '#Viral', '#Trending', '#YouTubeShorts',
+                        '#ViralClip', '#USA', '#MustWatch', '#Explore', '#ShortsFeed',
+                        '#FYP', '#ViralVideo', '#TrendingNow', '#ExploreMore', '#Amazing',
+                        '#Mystery', '#Unsolved', '#Unexplained']
+                for bh in base:
+                    if bh.lower() not in [h.lower() for h in desc_hashtags]:
+                        desc += '\n' + bh
+                        desc_hashtags.append(bh)
+                        if len(desc_hashtags) >= 15:
+                            break
+
+            tags = parsed.get('tags', [])
+            if len(tags) < 15:
+                base_tags = ['mystery', 'unsolved', 'unexplained', 'shorts', 'viral',
+                             'mrbeast', 'trending', 'youtube shorts', 'must watch', 'history',
+                             'documentary', 'creepy', 'paranormal', 'haunted', 'ghost']
+                for bt in base_tags:
+                    if bt not in tags and len(tags) < 15:
+                        tags.append(bt)
+
+            return {'title': title, 'description': desc, 'tags': tags}
+
+    return {
+        'title': topic + ' #Shorts #Viral #MrBeast #Trending',
+        'description': topic + ' remains one of history\'s greatest unsolved mysteries!\n\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing #Mystery #Unsolved',
+        'tags': ['mystery', 'unsolved', 'unexplained', 'shorts', 'viral', 'mrbeast', 'trending', 'youtube shorts', 'must watch', 'history', 'documentary', 'creepy', 'paranormal', 'haunted', 'ghost']
+    }
+
+
 def process_one_short(topic_data, idx):
     topic = topic_data['topic']
     hook = topic_data['hook']
@@ -467,8 +523,7 @@ def process_one_short(topic_data, idx):
     ass_path = 'captions_%d.ass' % idx
     with open(ass_path, 'w', encoding='utf-8') as f:
         f.write(build_mystery_ass(segments, voice_duration))
-
-    print('Rendering video...')
+            print('Rendering video...')
     out_path = 'mystery_short_%d.mp4' % idx
     ok = build_video_from_images(images, voice_path, voice_duration, ass_path, out_path)
 
@@ -547,7 +602,6 @@ def process_one_short(topic_data, idx):
     return row_id
 
 
-# MAIN EXECUTION
 for i in range(NUM_SHORTS):
     if i >= len(topics):
         break
