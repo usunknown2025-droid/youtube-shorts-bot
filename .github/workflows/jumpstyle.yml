@@ -12,7 +12,7 @@ on:
         type: string
       music_url:
         required: false
-        default: ''
+        default: 'https://audio.com/spotify-/audio/heavenly-jumpstyle'
         type: string
 
 jobs:
