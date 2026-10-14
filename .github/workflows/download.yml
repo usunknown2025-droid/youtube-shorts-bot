@@ -63,7 +63,7 @@ jobs:
         run: pip install --upgrade --pre yt-dlp
 
       - name: Install AI dependencies
-        run: pip install faster-whisper requests gtts
+        run: pip install faster-whisper requests gtts edge-tts
 
       - name: Create cookies file
         run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
