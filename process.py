@@ -1,596 +1,257 @@
-import json, os, requests, subprocess, time, re
+import json,os,requests,subprocess,time,re,asyncio
 from faster_whisper import WhisperModel
 from gtts import gTTS
+import edge_tts
 
-GROQ_KEY = os.environ['GROQ_API_KEY']
-CHAT_ID = os.environ.get('CHAT_ID', '')
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
-DURATION = int(os.environ.get('DURATION', '45'))
-NUM_SHORTS = int(os.environ.get('NUM_SHORTS', '3'))
-TOPIC = os.environ.get('TOPIC', '')
+GK=os.environ['GROQ_API_KEY']
+CID=os.environ.get('CHAT_ID','')
+BT=os.environ.get('BOT_TOKEN','')
+DUR=int(os.environ.get('DURATION','45'))
+NS=int(os.environ.get('NUM_SHORTS','3'))
+VN=os.environ.get('VOICE_NAME','en-US-DavisNeural')
+TOPIC=os.environ.get('TOPIC','')
+SU=os.environ.get('SUPABASE_URL','').rstrip('/')
+SK=os.environ.get('SUPABASE_KEY','')
 
-SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
-
-
-def contains_non_english(text):
-    for ch in text:
-        if ord(ch) > 0x0FFF:
-            return True
-    return False
-
-
-def get_audio_duration(path):
-    probe = subprocess.run(['ffprobe', '-v', 'error', '-show_entries',
-                            'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1',
-                            path], capture_output=True, text=True)
+def dur(p):
     try:
-        return float(probe.stdout.strip())
-    except:
-        return 10.0
+        r=subprocess.run(['ffprobe','-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',p],capture_output=True,text=True)
+        return float(r.stdout.strip())
+    except:return 10.0
 
-
-def groq_call(prompt, max_tokens=2000, temp=0.3, json_mode=False):
-    url = 'https://api.groq.com/openai/v1/chat/completions'
-    headers = {'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json'}
-    payload = {
-        'model': 'openai/gpt-oss-120b',
-        'messages': [{'role': 'user', 'content': prompt}],
-        'temperature': temp,
-        'max_tokens': max_tokens
-    }
-    if json_mode:
-        payload['response_format'] = {'type': 'json_object'}
-    for attempt in range(3):
+def gq(p,mt=2000,t=0.3,jm=False):
+    u='https://api.groq.com/openai/v1/chat/completions'
+    h={'Authorization':'Bearer '+GK,'Content-Type':'application/json'}
+    pl={'model':'openai/gpt-oss-120b','messages':[{'role':'system','content':'Respond with valid JSON only.'},{'role':'user','content':p}],'temperature':t,'max_tokens':mt}
+    if jm:pl['response_format']={'type':'json_object'}
+    for _ in range(3):
         try:
-            r = requests.post(url, headers=headers, json=payload, timeout=90)
-            result = r.json()
-            if 'choices' in result:
-                return result['choices'][0]['message']['content']
-            else:
-                print('Groq response: ' + str(result)[:300])
-                if 'rate limit' in str(result).lower() or 'rate_limit' in str(result).lower():
-                    time.sleep(60)
-                else:
-                    time.sleep(5)
-        except Exception as e:
-            print('Groq error: ' + str(e))
-            time.sleep(10)
+            r=requests.post(u,headers=h,json=pl,timeout=90).json()
+            if 'choices' in r:return r['choices'][0]['message']['content']
+            if 'rate limit' in str(r).lower():time.sleep(60)
+            else:time.sleep(5)
+        except:time.sleep(5)
     return None
 
-
-def save_to_supabase(chat_id, file_id, title, description, tags, short_number, thumbnail_urls='', topic=''):
-    url = SUPABASE_URL + '/rest/v1/pending_shorts'
-    headers = {
-        'apikey': SUPABASE_KEY,
-        'Authorization': 'Bearer ' + SUPABASE_KEY,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-    }
-    data = {
-        'chat_id': chat_id,
-        'file_id': file_id,
-        'title': title,
-        'description': description,
-        'tags': tags,
-        'status': 'pending',
-        'short_number': short_number,
-        'upload_status': 'pending',
-        'thumbnail_urls': thumbnail_urls,
-        'topic': topic
-    }
+def pj(t):
+    if not t:return None
     try:
-        r = requests.post(url, headers=headers, json=data, timeout=30)
-        result = r.json()
-        if isinstance(result, list) and len(result) > 0:
-            return result[0].get('id')
-        else:
-            print('Supabase save error: ' + str(result)[:300])
-    except Exception as e:
-        print('Supabase exception: ' + str(e))
+        c=t.strip()
+        if c.startswith('```'):
+            c=c.split('```')[1]
+            if c.startswith('json'):c=c[4:]
+        s=c.find('{');e=c.rfind('}')
+        if s>=0 and e>s:c=c[s:e+1]
+        return json.loads(c)
+    except:return None
+
+def sb(fid,ti,de,tg,n,sc='',vs=''):
+    u=SU+'/rest/v1/pending_shorts'
+    h={'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json','Prefer':'return=representation'}
+    d={'chat_id':CID,'file_id':fid,'title':ti,'description':de,'tags':tg,'status':'pending','short_number':n,'upload_status':'pending','content_type':'mrbeast','script':sc,'voice_style':vs}
+    try:
+        r=requests.post(u,headers=h,json=d,timeout=30).json()
+        if isinstance(r,list) and r:return r[0].get('id')
+    except:pass
     return None
 
+def tts(scr,path):
+    async def g():
+        c=edge_tts.Communicate(scr,VN)
+        await c.save(path)
+    try:
+        asyncio.run(g())
+        if os.path.getsize(path)>1000:return True
+    except:pass
+    try:
+        gTTS(text=scr,lang='en',slow=False).save(path)
+        return os.path.getsize(path)>1000
+    except:return False
 
-print('TOPIC: ' + TOPIC)
-print('STEP 1: Whisper Transcription')
-model = WhisperModel('tiny', device='cpu', compute_type='int8')
-segments, _ = model.transcribe('audio.wav', task='translate', word_timestamps=True)
-seg_data = []
-total_words = 0
-for s in segments:
-    seg_words = []
+def atime(s):
+    return str(int(s//3600))+':'+str(int((s%3600)//60)).zfill(2)+':'+('%05.2f'%(s%60))
+
+def wrap(t,mc=18):
+    ws=t.split();ls=[];c=''
+    for w in ws:
+        if len(c)+len(w)+1<=mc:c=(c+' '+w).strip()
+        else:
+            if c:ls.append(c)
+            c=w
+    if c:ls.append(c)
+    return '\\N'.join(ls[-2:])
+
+def mksubs(com,td,segs,atd=None):
+    if atd is None:atd=td
+    L=['[Script Info]','ScriptType: v4.00+','PlayResX: 720','PlayResY: 1280','WrapStyle: 0','ScaledBorderAndShadow: yes','','[V4+ Styles]','Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding','Style: Commentary,Arial,45,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,8,30,30,700,1','Style: Caption,Arial,80,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,2,30,30,270,1','','[Events]','Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text']
+    ws=com.split()
+    if ws:
+        wd=atd/len(ws);gr=[]
+        for i,w in enumerate(ws):
+            gr.append(w);a=i*wd;b=(i+1)*wd
+            if b<=a:b=a+0.2
+            L.append('Dialogue: 0,'+atime(a)+','+atime(b)+',Commentary,,0,0,0,,'+' '.join(gr))
+    for sg in segs:
+        sw=sg.get('words',[])
+        if not sw:
+            st=sg.get('text','').strip()
+            if st:
+                a=sg.get('start',0)+td;b=sg.get('end',0)+td
+                if b>a:L.append('Dialogue: 0,'+atime(a)+','+atime(b)+',Caption,,0,0,0,,'+wrap(st))
+            continue
+        gr=[]
+        for i,w in enumerate(sw):
+            gr.append(w['word'].strip());a=w['start']+td
+            b=sw[i+1]['start']+td if i+1<len(sw) else w['end']+td
+            if b<=a:b=a+0.3
+            L.append('Dialogue: 0,'+atime(a)+','+atime(b)+',Caption,,0,0,0,,'+wrap(' '.join(gr)))
+    return '\n'.join(L)
+
+def hooktext(ti):
+    c=re.sub(r'#\w+','',ti).strip()
+    st=['the','a','an','and','or','of','in','on','to','for','is','was','with','at','by']
+    ws=[w for w in c.split() if w.lower() not in st][:3]
+    h=' '.join(ws).upper()
+    h=re.sub(r'[^A-Z0-9 !?]','',h)
+    return h[:25].strip() or 'WATCH THIS'
+
+print('STEP 1: Whisper')
+m=WhisperModel('tiny',device='cpu',compute_type='int8')
+segs,_=m.transcribe('audio.wav',task='translate',word_timestamps=True)
+sd=[];tw=0
+for s in segs:
+    sw=[]
     if s.words:
         for w in s.words:
-            seg_words.append({'start': w.start, 'end': w.end, 'word': w.word})
-            total_words += 1
-    seg_data.append({'start': s.start, 'end': s.end, 'text': s.text.strip(), 'words': seg_words})
+            sw.append({'start':w.start,'end':w.end,'word':w.word});tw+=1
+    sd.append({'start':s.start,'end':s.end,'text':s.text.strip(),'words':sw})
+vtd=sd[-1]['end'] if sd else 60
+print('Words: '+str(tw)+' Dur: '+str(round(vtd,1))+'s')
 
-print('Transcript ready with ' + str(total_words) + ' words')
-video_total_duration = seg_data[-1]['end'] if seg_data else 60
-print('Video total duration: %0.1f seconds' % video_total_duration)
+print('STEP 2: Moments')
+mp=int(vtd//DUR);tm=min(NS,mp)
+ct=' '.join([s['text'] for s in sd])[:4000]
+p='Find '+str(tm)+' viral moments (~'+str(DUR)+'s each, no overlap). Return JSON: {"moments":[{"start":12.5,"end":57.5,"reason":"why"}]}\n\n'+ct
+r=gq(p,1500,0.3,True)
+am=[]
+if r:
+    d=pj(r)
+    if d:am=d.get('moments',[])
+if len(am)<tm:
+    es=set(int(x.get('start',0)) for x in am)
+    for i in range(tm):
+        cs=int(i*(vtd-DUR)/max(1,tm-1)) if tm>1 else 0
+        ce=cs+DUR
+        if cs in es:continue
+        ov=False
+        for x in am:
+            if not(ce<=float(x.get('start',0)) or cs>=float(x.get('end',0))):ov=True;break
+        if not ov:am.append({'start':cs,'end':ce,'reason':'fb'})
+        if len(am)>=tm:break
+am.sort(key=lambda x:x.get('start',0))
+fl=[]
+for x in am:
+    ov=False
+    for f in fl:
+        if not(x['end']<=f['start'] or x['start']>=f['end']):ov=True;break
+    if not ov:fl.append(x)
+    if len(fl)>=tm:break
+moments=fl[:tm] or [{'start':0,'end':DUR,'reason':'fb'}]
+print('Got '+str(len(moments))+' moments')
 
-
-print('STEP 2: Find Viral Moments')
-max_possible = int(video_total_duration // DURATION)
-target_moments = min(NUM_SHORTS, max_possible)
-
-combined_text = ' '.join([s['text'] for s in seg_data])
-if len(combined_text) > 4000:
-    combined_text = combined_text[:4000] + '...'
-
-prompt = 'Find ' + str(target_moments) + ' viral moments (~' + str(DURATION) + 's each, no overlap) from this transcript.\n\n'
-prompt += 'Return ONLY valid JSON, no markdown:\n'
-prompt += '{"moments": [{"start": 12.5, "end": 57.5, "reason": "why viral"}]}\n\n'
-prompt += 'TRANSCRIPT:\n' + combined_text
-
-result = groq_call(prompt, max_tokens=1500, temp=0.3, json_mode=True)
-
-all_moments = []
-if result:
-    try:
-        clean = result.strip()
-        if clean.startswith('```'):
-            clean = clean.split('```')[1]
-            if clean.startswith('json'):
-                clean = clean[4:]
-        clean = clean.strip()
-        data = json.loads(clean)
-        all_moments = data.get('moments', [])
-        print('Groq returned ' + str(len(all_moments)) + ' moments')
-    except Exception as e:
-        print('JSON parse error: ' + str(e))
-
-if len(all_moments) < target_moments:
-    existing_starts = set(int(m.get('start', 0)) for m in all_moments)
-    for i in range(target_moments):
-        candidate_start = int(i * (video_total_duration - DURATION) / max(1, target_moments - 1)) if target_moments > 1 else 0
-        candidate_end = candidate_start + DURATION
-        if candidate_start in existing_starts:
-            continue
-        overlap = False
-        for m in all_moments:
-            ms = float(m.get('start', 0))
-            me = float(m.get('end', 0))
-            if not (candidate_end <= ms or candidate_start >= me):
-                overlap = True
-                break
-        if not overlap:
-            all_moments.append({'start': candidate_start, 'end': candidate_end, 'reason': 'fallback'})
-        if len(all_moments) >= target_moments:
-            break
-
-all_moments.sort(key=lambda x: x.get('start', 0))
-filtered = []
-for m in all_moments:
-    overlap = False
-    for f in filtered:
-        if not (m['end'] <= f['start'] or m['start'] >= f['end']):
-            overlap = True
-            break
-    if not overlap:
-        filtered.append(m)
-    if len(filtered) >= target_moments:
-        break
-
-moments = filtered[:target_moments]
-if not moments:
-    moments = [{'start': 0, 'end': DURATION, 'reason': 'fallback'}]
-print('Final: Got ' + str(len(moments)) + ' moments')
-
-
-def gen_commentary(moment_text):
-    prompt = 'Write short ENGLISH commentary (max 35 words) for this video segment.\n\n'
-    prompt += 'RULES:\n'
-    prompt += '1. PURE ENGLISH only - no Hindi, no other scripts\n'
-    prompt += '2. Describe the SPECIFIC action happening in the video\n'
-    prompt += '3. End with a CALL TO ACTION like "Comment what you think!" or "Follow for more!"\n'
-    prompt += '4. Keep it under 35 words total\n'
-    prompt += '5. Just the commentary, no labels\n\n'
-    prompt += 'Segment: ' + moment_text[:800]
-    for attempt in range(3):
-        result = groq_call(prompt, max_tokens=180, temp=0.7)
-        if result:
-            t = result.strip()
-            if not contains_non_english(t):
-                return t
-        time.sleep(10)
-    return 'Check out this amazing moment! Comment what you think!'
-
-
-def gen_yt_metadata(moment_text, commentary):
-    prompt = 'You are a YouTube Shorts SEO expert. Analyze the ACTUAL content and generate metadata.\n\n'
-    if TOPIC:
-        prompt += 'USER PROVIDED TOPIC: ' + TOPIC + '\n'
-        prompt += '(Use this topic as context for better metadata)\n\n'
-    prompt += '=== VIDEO CONTENT ===\n'
-    prompt += 'TRANSCRIPT: ' + moment_text[:1500] + '\n\n'
-    prompt += 'COMMENTARY: ' + commentary[:300] + '\n\n'
-    prompt += '=== END CONTENT ===\n\n'
-    prompt += 'Now generate metadata based on WHAT ACTUALLY HAPPENS in the video.\n\n'
-    prompt += 'STRICT RULES:\n\n'
-    prompt += 'TITLE RULES:\n'
-    prompt += '- MUST describe the SPECIFIC action/event/object shown in the video\n'
-    prompt += '- Extract KEY SUBJECTS from the transcript (people, places, objects, actions)\n'
-    prompt += '- Do NOT use generic phrases like "Viral Moment", "Amazing Video", "Unbelievable", "Must See" ALONE\n'
-    prompt += '- GOOD EXAMPLES:\n'
-    prompt += '  * "Woman Finds $10,000 in Old Suitcase #Shorts #Viral #MrBeast #Trending"\n'
-    prompt += '  * "Cheetah Chases Gazelle at Full Speed #Shorts #Viral #MrBeast #Trending"\n'
-    prompt += '- MUST end with EXACTLY these 4 hashtags: #Shorts #Viral #MrBeast #Trending\n'
-    prompt += '- Total under 100 chars\n\n'
-    prompt += 'DESCRIPTION RULES:\n'
-    prompt += '- Line 1: Specific sentence describing what actually happens (SEO keyword-rich)\n'
-    prompt += '- Line 2-3: 1-2 more lines with details\n'
-    prompt += '- Then blank line\n'
-    prompt += '- Then 15-20 hashtags on separate lines\n'
-    prompt += '- MUST include these: #MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing\n'
-    prompt += '- PLUS 3-5 content-specific hashtags\n\n'
-    prompt += 'TAGS RULES:\n'
-    prompt += '- MUST be 15 tags minimum (JSON array of strings)\n'
-    prompt += '- Each tag must be SPECIFIC to the content (nouns, actions, locations)\n\n'
-    prompt += 'Return ONLY valid JSON (no markdown):\n'
-    prompt += '{"title": "...", "description": "...", "tags": ["tag1", "tag2", "...15 tags minimum..."]}'
+for idx,mom in enumerate(moments):
+    print('SHORT '+str(idx+1)+'/'+str(len(moments)))
+    st=float(mom['start']);en=float(mom['end']);d=en-st
+    msegs=[]
+    for sg in sd:
+        if sg['end']<st or sg['start']>en:continue
+        nw={'start':max(sg['start'],st)-st,'end':min(sg['end'],en)-st,'text':sg['text'],'words':[]}
+        for w in sg.get('words',[]):
+            if w['end']<st or w['start']>en:continue
+            nw['words'].append({'start':max(w['start'],st)-st,'end':min(w['end'],en)-st,'word':w['word']})
+        if nw['end']>nw['start']:msegs.append(nw)
+    if not msegs:continue
+    mt=' '.join([s['text'] for s in msegs])
     
-    result = groq_call(prompt, max_tokens=1200, temp=0.5, json_mode=True)
-    if result:
-        try:
-            clean = result.strip()
-            if clean.startswith('```'):
-                clean = clean.split('```')[1]
-                if clean.startswith('json'):
-                    clean = clean[4:]
-            clean = clean.strip()
-            parsed = json.loads(clean)
-            
-            title = parsed.get('title', 'Viral Moment')
-            required = ['#Shorts', '#Viral', '#MrBeast', '#Trending']
-            title_hashtags = re.findall(r'#\w+', title)
-            for ht in required:
-                if ht.lower() not in [t.lower() for t in title_hashtags]:
-                    title = title.rstrip() + ' ' + ht
-            
-            desc = parsed.get('description', '')
-            desc_hashtags = re.findall(r'#\w+', desc)
-            if len(desc_hashtags) < 15:
-                base = ['#MrBeast', '#Shorts', '#Viral', '#Trending', '#YouTubeShorts',
-                        '#ViralClip', '#USA', '#MustWatch', '#Explore', '#ShortsFeed',
-                        '#FYP', '#ViralVideo', '#TrendingNow', '#ExploreMore', '#Amazing']
-                for bh in base:
-                    if bh.lower() not in [h.lower() for h in desc_hashtags]:
-                        desc += '\n' + bh
-                        desc_hashtags.append(bh)
-                        if len(desc_hashtags) >= 15:
-                            break
-            
-            tags = parsed.get('tags', [])
-            if len(tags) < 12:
-                base_tags = ['shorts', 'viral', 'trending', 'mrbeast', 'youtube shorts', 
-                             'viral clip', 'must watch', 'trending now', 'explore']
-                for bt in base_tags:
-                    if bt not in tags:
-                        tags.append(bt)
-            
-            return {'title': title, 'description': desc, 'tags': tags}
-        except Exception as e:
-            print('Metadata parse error: ' + str(e))
+    cp='Write short ENGLISH commentary (max 35 words). Describe SPECIFIC action. End with CTA like "Comment what you think!". Segment: '+mt[:800]
+    com='Check out this amazing moment! Comment what you think!'
+    for _ in range(3):
+        r=gq(cp,150,0.7)
+        if r:
+            t=r.strip()
+            if t:com=t;break
+        time.sleep(5)
+    com=re.sub(r'["\'\n\r]',' ',com).strip()[:300]
+    print('Com: '+com[:80])
     
-    return {
-        'title': 'Viral Moment You Must See! #Shorts #Viral #MrBeast #Trending',
-        'description': 'Watch this amazing viral moment!\n\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing',
-        'tags': ['shorts', 'viral', 'trending', 'mrbeast', 'youtube shorts', 'viral clip', 'must watch', 'trending now', 'explore', 'amazing', 'usa', 'fyp']
-    }
-
-
-def gen_tts(text, path):
-    for attempt in range(3):
-        try:
-            tts = gTTS(text=text, lang='en', slow=False)
-            tts.save(path)
-            if os.path.exists(path) and os.path.getsize(path) > 1000:
-                return True
-        except Exception as e:
-            print('TTS error: ' + str(e))
-            time.sleep(3)
-    return False
-
-
-def ass_time(seconds):
-    hrs = int(seconds // 3600)
-    mins = int((seconds % 3600) // 60)
-    secs = seconds % 60
-    return '%d:%02d:%05.2f' % (hrs, mins, secs)
-
-
-def wrap_caption(text, max_chars=18):
-    words = text.split()
-    lines = []
-    current = ""
-    for w in words:
-        if len(current) + len(w) + 1 <= max_chars:
-            current = (current + " " + w).strip()
-        else:
-            if current:
-                lines.append(current)
-            current = w
-    if current:
-        lines.append(current)
-    if len(lines) > 2:
-        lines = lines[-2:]
-    return '\\N'.join(lines)
-
-
-def build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur=None):
-    if actual_tts_dur is None:
-        actual_tts_dur = tts_dur
-    lines = []
-    lines.append('[Script Info]')
-    lines.append('ScriptType: v4.00+')
-    lines.append('PlayResX: 720')
-    lines.append('PlayResY: 1280')
-    lines.append('WrapStyle: 0')
-    lines.append('ScaledBorderAndShadow: yes')
-    lines.append('')
-    lines.append('[V4+ Styles]')
-    lines.append('Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding')
-    lines.append('Style: Commentary,Arial,45,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,8,30,30,700,1')
-    lines.append('Style: Caption,Arial,80,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,2,30,30,270,1')
-    lines.append('')
-    lines.append('[Events]')
-    lines.append('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text')
-
-    words = commentary.split()
-    if words:
-        word_dur = actual_tts_dur / float(len(words))
-        growing = []
-        for i, w in enumerate(words):
-            growing.append(w)
-            s = i * word_dur
-            e = (i + 1) * word_dur
-            if e <= s:
-                e = s + 0.2
-            text = wrap_caption(' '.join(growing), 25)
-            lines.append('Dialogue: 0,%s,%s,Commentary,,0,0,0,,%s' % (ass_time(s), ass_time(e), text))
-
-    for seg in moment_segs:
-        seg_words = seg.get('words', [])
-        if not seg_words:
-            seg_text = seg.get('text', '').strip()
-            if seg_text:
-                s = seg.get('start', 0) + tts_dur
-                e = seg.get('end', 0) + tts_dur
-                if e > s:
-                    wrapped = wrap_caption(seg_text)
-                    lines.append('Dialogue: 0,%s,%s,Caption,,0,0,0,,%s' % (ass_time(s), ass_time(e), wrapped))
-            continue
-        growing = []
-        for i, w in enumerate(seg_words):
-            growing.append(w['word'].strip())
-            s = w['start'] + tts_dur
-            if i + 1 < len(seg_words):
-                e = seg_words[i + 1]['start'] + tts_dur
-            else:
-                e = w['end'] + tts_dur
-            if e <= s:
-                e = s + 0.3
-            text = wrap_caption(' '.join(growing))
-            lines.append('Dialogue: 0,%s,%s,Caption,,0,0,0,,%s' % (ass_time(s), ass_time(e), text))
-
-    return '\n'.join(lines)
-
-
-def build_hook_text(title):
-    clean_title = re.sub(r'#\w+', '', title)
-    clean_title = clean_title.strip()
-    stop_words = ['the', 'a', 'an', 'and', 'or', 'of', 'in', 'on', 'to', 'for', 'is', 'was', 'with', 'at', 'by']
-    words = clean_title.split()
-    important_words = [w for w in words if w.lower() not in stop_words]
-    hook_words = important_words[:3]
-    hook_text = ' '.join(hook_words).upper()
-    hook_text = re.sub(r'[^A-Z0-9 !?]', '', hook_text)
-    if len(hook_text) > 25:
-        hook_text = hook_text[:25].strip()
-    if not hook_text:
-        hook_text = 'WATCH THIS'
-    return hook_text
-
-
-for idx, moment in enumerate(moments):
-    print('SHORT ' + str(idx + 1) + '/' + str(len(moments)))
-    start = float(moment['start'])
-    end = float(moment['end'])
-    duration = end - start
-
-    moment_segs = []
-    for seg in seg_data:
-        if seg['end'] < start or seg['start'] > end:
-            continue
-        new_seg = {
-            'start': max(seg['start'], start) - start,
-            'end': min(seg['end'], end) - start,
-            'text': seg['text'],
-            'words': []
-        }
-        for w in seg.get('words', []):
-            if w['end'] < start or w['start'] > end:
-                continue
-            new_seg['words'].append({
-                'start': max(w['start'], start) - start,
-                'end': min(w['end'], end) - start,
-                'word': w['word']
-            })
-        if new_seg['end'] > new_seg['start']:
-            moment_segs.append(new_seg)
-
-    if not moment_segs:
-        continue
-
-    moment_text = ' '.join([s['text'] for s in moment_segs])
-    print('Moment text: ' + moment_text[:150])
-
-    commentary = gen_commentary(moment_text)
-    commentary = re.sub(r'["\'\n\r]', ' ', commentary).strip()[:300]
-    print('Commentary: ' + commentary)
-
-    print('Generating metadata with hashtags...')
-    meta = gen_yt_metadata(moment_text, commentary)
-    title = meta.get('title', 'Viral Moment')
-    description = meta.get('description', '')
-    tags = ', '.join(meta.get('tags', []))
-    print('Title: ' + title)
-
-    tts_path = 'tts_%d.mp3' % idx
-    if not gen_tts(commentary, tts_path):
-        subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
-                        '-t', '30', '-q:a', '9', '-acodec', 'libmp3lame', tts_path])
-
-    actual_tts_dur = get_audio_duration(tts_path)
-    tts_dur = actual_tts_dur + 0.4
-
-    ass_path = 'subs_%d.ass' % idx
-    with open(ass_path, 'w', encoding='utf-8') as f:
-        f.write(build_combined_ass(commentary, tts_dur, moment_segs, actual_tts_dur))
-
-    print('Extracting hook frame...')
-    hook_frame = 'hook_%d.jpg' % idx
-    hook_offset = min(2.0, duration * 0.3)
-    hook_time = start + hook_offset
-    subprocess.run([
-        'ffmpeg', '-y', '-ss', str(hook_time), '-i', 'video.mp4',
-        '-vframes', '1', '-vf', 'scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1',
-        '-q:v', '2', hook_frame
-    ], capture_output=True)
-
-    hook_text = build_hook_text(title)
-    print('Hook text: ' + hook_text)
-
-    font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
-
-    print('Rendering video...')
-    out_path = 'shorts_%d.mp4' % idx
-    vf = ("[2:v]fps=30,scale=720:1280,setsar=1,"
-          "drawtext=text='" + hook_text + "':"
-          "fontcolor=Yellow:fontsize=58:"
-          "borderw=6:bordercolor=Black:"
-          "box=1:boxcolor=Black@0.6:boxborderw=15:"
-          "x=(w-text_w)/2:y=h*0.12:"
-          "fontfile=" + font_path + "[hookvid];"
-          "[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];"
-          "[hookvid][v0]concat=n=2:v=1:a=0[vcat];"
-          "[vcat]ass=" + ass_path + "[v]")
-    af = ("[1:a]volume=1.0[tts];"
-          "[0:a]volume=0.2[orig];"
-          "[tts][orig]concat=n=2:v=0:a=1[aout]")
-
-    subprocess.run([
-        'ffmpeg', '-y', '-ss', str(start), '-t', str(duration),
-        '-i', 'video.mp4', '-i', tts_path,
-        '-loop', '1', '-t', str(tts_dur), '-i', hook_frame,
-        '-filter_complex', vf + ';' + af,
-        '-map', '[v]', '-map', '[aout]',
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '26',
-        '-c:a', 'aac', '-b:a', '128k',
-        out_path
-    ])
-
+    tp='YouTube Shorts metadata. Topic: '+(TOPIC or 'video content')+'\nTranscript: '+mt[:800]+'\nCommentary: '+com[:300]+'\nRules:\n- Title specific to content + end "#Shorts #Viral #MrBeast #Trending"\n- Desc: 2-3 lines + blank + 15-20 hashtags\n- Tags: 15 minimum\nReturn JSON: {"title":"...","description":"...","tags":["t1"]}'
+    ti='Viral Moment #Shorts #Viral #MrBeast #Trending'
+    de='Viral moment!\n\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing'
+    tgs='shorts, viral, trending, mrbeast, youtube shorts, must watch, explore, fyp, viral clip, usa, amazing, funny, wow, best, top'
+    r=gq(tp,900,0.5,True)
+    if r:
+        d=pj(r)
+        if d:
+            ti=d.get('title','')
+            for h in ['#Shorts','#Viral','#MrBeast','#Trending']:
+                if h.lower() not in ti.lower():ti=ti.rstrip()+' '+h
+            de=d.get('description','')
+            if len(re.findall(r'#\w+',de))<15:
+                for b in ['#MrBeast','#Shorts','#Viral','#Trending','#YouTubeShorts','#ViralClip','#USA','#MustWatch','#Explore','#ShortsFeed','#FYP','#ViralVideo','#TrendingNow','#ExploreMore','#Amazing']:
+                    if b.lower() not in de.lower():de+='\n'+b
+            tgd=d.get('tags',[])
+            if len(tgd)<15:
+                for b in ['shorts','viral','trending','mrbeast','youtube shorts','must watch','explore','fyp','viral clip','usa','amazing','funny','wow','best','top']:
+                    if b not in tgd and len(tgd)<15:tgd.append(b)
+            tgs=', '.join(tgd)
+    print('Ti: '+ti[:80])
+    
+    vp='v_'+str(idx)+'.mp3'
+    if not tts(com,vp):
+        subprocess.run(['ffmpeg','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t','30','-q:a','9','-acodec','libmp3lame',vp])
+    atd=dur(vp);td=atd+0.4
+    
+    ap='s_'+str(idx)+'.ass'
+    open(ap,'w',encoding='utf-8').write(mksubs(com,td,msegs,atd))
+    
+    hp='h_'+str(idx)+'.jpg'
+    ho=min(2.0,d*0.3);ht=st+ho
+    subprocess.run(['ffmpeg','-y','-ss',str(ht),'-i','video.mp4','-vframes','1','-vf','scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1','-q:v','2',hp],capture_output=True)
+    htx=hooktext(ti)
+    print('Hook: '+htx)
+    fp='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+    
+    op='short_'+str(idx)+'.mp4'
+    vf='[2:v]fps=30,scale=720:1280,setsar=1,drawtext=text=\''+htx+'\':fontcolor=Yellow:fontsize=58:borderw=6:bordercolor=Black:box=1:boxcolor=Black@0.6:boxborderw=15:x=(w-text_w)/2:y=h*0.12:fontfile='+fp+'[hv];[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];[hv][v0]concat=n=2:v=1:a=0[vc];[vc]ass='+ap+'[v]'
+    af='[1:a]volume=1.0[t];[0:a]volume=0.2[o];[t][o]concat=n=2:v=0:a=1[a]'
+    subprocess.run(['ffmpeg','-y','-ss',str(st),'-t',str(d),'-i','video.mp4','-i',vp,'-loop','1','-t',str(td),'-i',hp,'-filter_complex',vf+';'+af,'-map','[v]','-map','[a]','-c:v','libx264','-preset','fast','-crf','24','-c:a','aac','-b:a','128k',op],capture_output=True)
+    try:os.remove(hp)
+    except:pass
+    
+    tg=subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendVideo','-F','chat_id='+CID,'-F','video=@'+op,'-F','caption=Short '+str(idx+1)+'/'+str(len(moments))],capture_output=True,text=True)
+    fid=None
     try:
-        os.remove(hook_frame)
-    except:
-        pass
-
-    print('Sending video to Telegram...')
-    tg_response = subprocess.run([
-        'curl', '-s', '-X', 'POST',
-        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendVideo',
-        '-F', 'chat_id=' + CHAT_ID,
-        '-F', 'video=@' + out_path,
-        '-F', 'caption=Short ' + str(idx + 1) + '/' + str(len(moments))
-    ], capture_output=True, text=True)
-
-    file_id = None
-    try:
-        tg_json = json.loads(tg_response.stdout)
-        if tg_json.get('ok'):
-            file_id = tg_json['result']['video']['file_id']
-            print('Video File ID: ' + file_id)
-    except Exception as e:
-        print('Telegram parse error: ' + str(e))
-
-    if not file_id:
-        print('File ID not received, skipping')
-        continue
-
-    print('Saving to Supabase...')
-    row_id = save_to_supabase(CHAT_ID, file_id, title, description, tags, idx + 1, '', TOPIC)
-    print('Supabase row ID: ' + str(row_id))
-
-    if not row_id:
-        continue
-
-    keyboard = json.dumps({
-        'inline_keyboard': [
-            [
-                {'text': '✅ Upload', 'callback_data': 'approve_' + str(row_id)},
-                {'text': '📅 Schedule', 'callback_data': 'schedule_' + str(row_id)}
-            ],
-            [
-                {'text': '✏️ Custom', 'callback_data': 'custom_' + str(row_id)},
-                {'text': '❌ Skip', 'callback_data': 'skip_' + str(row_id)}
-            ]
-        ]
-    })
-
-    approval_text = '📝 Short ' + str(idx + 1) + '/' + str(len(moments)) + '\n\n'
-    if TOPIC:
-        approval_text += '🎬 Topic: ' + TOPIC + '\n\n'
-    approval_text += '📄 Title: ' + title + '\n\n'
-    approval_text += '📝 Description: ' + description[:400] + '...\n\n'
-    approval_text += '🏷️ Tags: ' + tags[:300] + '...\n\n'
-    approval_text += 'Kya karna hai?'
-
-    print('Sending approval message...')
-    approval_resp = subprocess.run([
-        'curl', '-s', '-X', 'POST',
-        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
-        '--data-urlencode', 'chat_id=' + CHAT_ID,
-        '--data-urlencode', 'text=' + approval_text,
-        '--data-urlencode', 'reply_markup=' + keyboard
-    ], capture_output=True, text=True)
-    print('Approval response: ' + approval_resp.stdout[:500])
-
-    prompt_text = '🎨 CHATGPT THUMBNAIL PROMPT for Short ' + str(idx + 1) + '\n\n'
-    prompt_text += 'Copy this and paste in ChatGPT:\n\n'
-    prompt_text += 'You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
-    prompt_text += 'VIDEO TOPIC: ' + re.sub(r'#\w+', '', title).strip() + '\n\n'
-    prompt_text += 'RULES:\n'
-    prompt_text += '1. Real human face with SHOCKED or EXCITED expression\n'
-    prompt_text += '2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
-    prompt_text += '3. Large EMOJI in corner (shocked face, fire, money, lightning)\n'
-    prompt_text += '4. RED CIRCLE or RED ARROW pointing to key detail\n'
-    prompt_text += '5. HIGH CONTRAST, saturated vibrant colors\n'
-    prompt_text += '6. Text readable on mobile, max 4 words\n'
-    prompt_text += '7. Format: 9:16 vertical (720x1280)\n\n'
-    prompt_text += 'GENERATE THESE 6 STYLES:\n\n'
-    prompt_text += 'STYLE 1 - Face + Big Text + Emoji\n'
-    prompt_text += 'STYLE 2 - Action Frame + Red Circle\n'
-    prompt_text += 'STYLE 3 - Face + Text + Red Arrow\n'
-    prompt_text += 'STYLE 4 - Text-Heavy + Small Face\n'
-    prompt_text += 'STYLE 5 - Before/After Split\n'
-    prompt_text += 'STYLE 6 - Dramatic Zoom + Text\n\n'
-    prompt_text += 'For each: generate image, label "Style 1", "Style 2" etc.\n'
-    prompt_text += 'Output all 6 images so I can compare and choose.'
-
-    subprocess.run([
-        'curl', '-s', '-X', 'POST',
-        'https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage',
-        '-d', 'chat_id=' + CHAT_ID,
-        '-d', 'text=' + prompt_text
-    ])
-
+        j=json.loads(tg.stdout)
+        if j.get('ok'):fid=j['result']['video']['file_id']
+    except:pass
+    if not fid:continue
+    
+    rid=sb(fid,ti,de,tgs,idx+1,com,VN)
+    print('Row: '+str(rid))
+    if not rid:continue
+    
+    kb=json.dumps({'inline_keyboard':[[{'text':'✅ Upload','callback_data':'approve_'+str(rid)},{'text':'📅 Schedule','callback_data':'schedule_'+str(rid)}],[{'text':'✏️ Custom','callback_data':'custom_'+str(rid)},{'text':'❌ Skip','callback_data':'skip_'+str(rid)}]]})
+    txt='📝 *Short '+str(idx+1)+'/'+str(len(moments))+'*\n\n'
+    if TOPIC:txt+='🎬 Topic: '+TOPIC+'\n\n'
+    txt+='📄 Title: '+ti+'\n\n📝 Description: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
+    subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+txt,'-d','parse_mode=Markdown','-d','reply_markup='+kb],capture_output=True,text=True)
+    
+    pt='🎨 CHATGPT THUMBNAIL PROMPT for Short '+str(idx+1)+'\n\nCopy this and paste in ChatGPT:\n\nYou are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\nVIDEO TOPIC: '+re.sub(r'#\w+','',ti).strip()+'\n\nRULES:\n1. Real human face with SHOCKED or EXCITED expression\n2. BIG BOLD YELLOW text with THICK BLACK OUTLINE\n3. Large EMOJI in corner\n4. RED CIRCLE or RED ARROW pointing to key detail\n5. HIGH CONTRAST, saturated vibrant colors\n6. Format: 9:16 vertical (720x1280)\n\nSTYLES: 1-Face+Big Text+Emoji, 2-Action+Red Circle, 3-Face+Text+Red Arrow, 4-Text-Heavy+Small Face, 5-Before/After Split, 6-Dramatic Zoom+Text\n\nFor each: generate image, label "Style 1", "Style 2" etc.\nOutput all 6 images so I can compare.'
+    subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+pt],capture_output=True,text=True)
+    
     time.sleep(3)
-
     try:
-        os.remove(tts_path)
-        os.remove(ass_path)
-    except:
-        pass
+        os.remove(vp);os.remove(ap)
+    except:pass
 
-print('All shorts generated and sent for approval!')
+print('All Done!')
