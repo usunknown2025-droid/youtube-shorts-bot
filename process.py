@@ -48,9 +48,9 @@ def pj(t):
 def sb(fid,ti,de,tg,n,sc='',vs=''):
     u=SU+'/rest/v1/pending_shorts'
     h={'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json','Prefer':'return=representation'}
-    d={'chat_id':CID,'file_id':fid,'title':ti,'description':de,'tags':tg,'status':'pending','short_number':n,'upload_status':'pending','content_type':'mrbeast','script':sc,'voice_style':vs}
+    data={'chat_id':CID,'file_id':fid,'title':ti,'description':de,'tags':tg,'status':'pending','short_number':n,'upload_status':'pending','content_type':'mrbeast','script':sc,'voice_style':vs}
     try:
-        r=requests.post(u,headers=h,json=d,timeout=30).json()
+        r=requests.post(u,headers=h,json=data,timeout=30).json()
         if isinstance(r,list) and r:return r[0].get('id')
     except:pass
     return None
@@ -135,8 +135,8 @@ p='Find '+str(tm)+' viral moments (~'+str(DUR)+'s each, no overlap). Return JSON
 r=gq(p,1500,0.3,True)
 am=[]
 if r:
-    d=pj(r)
-    if d:am=d.get('moments',[])
+    md=pj(r)
+    if md:am=md.get('moments',[])
 if len(am)<tm:
     es=set(int(x.get('start',0)) for x in am)
     for i in range(tm):
@@ -161,7 +161,7 @@ print('Got '+str(len(moments))+' moments')
 
 for idx,mom in enumerate(moments):
     print('SHORT '+str(idx+1)+'/'+str(len(moments)))
-    st=float(mom['start']);en=float(mom['end']);d=en-st
+    st=float(mom['start']);en=float(mom['end']);durclip=en-st
     msegs=[]
     for sg in sd:
         if sg['end']<st or sg['start']>en:continue
@@ -190,16 +190,16 @@ for idx,mom in enumerate(moments):
     tgs='shorts, viral, trending, mrbeast, youtube shorts, must watch, explore, fyp, viral clip, usa, amazing, funny, wow, best, top'
     r=gq(tp,900,0.5,True)
     if r:
-        d=pj(r)
-        if d:
-            ti=d.get('title','')
+        mt_d=pj(r)
+        if mt_d:
+            ti=mt_d.get('title','')
             for h in ['#Shorts','#Viral','#MrBeast','#Trending']:
                 if h.lower() not in ti.lower():ti=ti.rstrip()+' '+h
-            de=d.get('description','')
+            de=mt_d.get('description','')
             if len(re.findall(r'#\w+',de))<15:
                 for b in ['#MrBeast','#Shorts','#Viral','#Trending','#YouTubeShorts','#ViralClip','#USA','#MustWatch','#Explore','#ShortsFeed','#FYP','#ViralVideo','#TrendingNow','#ExploreMore','#Amazing']:
                     if b.lower() not in de.lower():de+='\n'+b
-            tgd=d.get('tags',[])
+            tgd=mt_d.get('tags',[])
             if len(tgd)<15:
                 for b in ['shorts','viral','trending','mrbeast','youtube shorts','must watch','explore','fyp','viral clip','usa','amazing','funny','wow','best','top']:
                     if b not in tgd and len(tgd)<15:tgd.append(b)
@@ -215,7 +215,7 @@ for idx,mom in enumerate(moments):
     open(ap,'w',encoding='utf-8').write(mksubs(com,td,msegs,atd))
     
     hp='h_'+str(idx)+'.jpg'
-    ho=min(2.0,d*0.3);ht=st+ho
+    ho=min(2.0,durclip*0.3);ht=st+ho
     subprocess.run(['ffmpeg','-y','-ss',str(ht),'-i','video.mp4','-vframes','1','-vf','scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,setsar=1','-q:v','2',hp],capture_output=True)
     htx=hooktext(ti)
     print('Hook: '+htx)
@@ -224,7 +224,7 @@ for idx,mom in enumerate(moments):
     op='short_'+str(idx)+'.mp4'
     vf='[2:v]fps=30,scale=720:1280,setsar=1,drawtext=text=\''+htx+'\':fontcolor=Yellow:fontsize=58:borderw=6:bordercolor=Black:box=1:boxcolor=Black@0.6:boxborderw=15:x=(w-text_w)/2:y=h*0.12:fontfile='+fp+'[hv];[0:v]crop=ih*9/16:ih,scale=720:1280:flags=lanczos,setsar=1,fps=30[v0];[hv][v0]concat=n=2:v=1:a=0[vc];[vc]ass='+ap+'[v]'
     af='[1:a]volume=1.0[t];[0:a]volume=0.2[o];[t][o]concat=n=2:v=0:a=1[a]'
-    subprocess.run(['ffmpeg','-y','-ss',str(st),'-t',str(d),'-i','video.mp4','-i',vp,'-loop','1','-t',str(td),'-i',hp,'-filter_complex',vf+';'+af,'-map','[v]','-map','[a]','-c:v','libx264','-preset','fast','-crf','24','-c:a','aac','-b:a','128k',op],capture_output=True)
+    subprocess.run(['ffmpeg','-y','-ss',str(st),'-t',str(durclip),'-i','video.mp4','-i',vp,'-loop','1','-t',str(td),'-i',hp,'-filter_complex',vf+';'+af,'-map','[v]','-map','[a]','-c:v','libx264','-preset','fast','-crf','24','-c:a','aac','-b:a','128k',op],capture_output=True)
     try:os.remove(hp)
     except:pass
     
