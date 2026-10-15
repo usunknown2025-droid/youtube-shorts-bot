@@ -129,39 +129,54 @@ vtd=sd[-1]['end'] if sd else 60
 print('Words: '+str(tw)+' Dur: '+str(round(vtd,1))+'s')
 
 print('STEP 2: Moments')
-mp=int(vtd//DUR);tm=min(NS,mp)
+mp=int(vtd//DUR);tm=min(NS,mp) if mp>0 else NS
 ct=' '.join([s['text'] for s in sd])[:4000]
 p='Find '+str(tm)+' viral moments (~'+str(DUR)+'s each, no overlap). Return JSON: {"moments":[{"start":12.5,"end":57.5,"reason":"why"}]}\n\n'+ct
 r=gq(p,1500,0.3,True)
 am=[]
 if r:
     md=pj(r)
-    if md:am=md.get('moments',[])
+    if md and isinstance(md.get('moments'),list):
+        for x in md['moments']:
+            try:
+                s=float(x.get('start',0) or 0)
+                e=float(x.get('end',0) or 0)
+                if e>s and e<=vtd+5:
+                    am.append({'start':s,'end':e,'reason':x.get('reason','')})
+            except:pass
+print('Raw moments: '+str(len(am)))
+
 if len(am)<tm:
-    es=set(int(x.get('start',0)) for x in am)
+    es=set(int(x['start']) for x in am)
     for i in range(tm):
         cs=int(i*(vtd-DUR)/max(1,tm-1)) if tm>1 else 0
         ce=cs+DUR
+        if ce>vtd:ce=vtd;cs=max(0,ce-DUR)
         if cs in es:continue
         ov=False
         for x in am:
-            if not(ce<=float(x.get('start',0)) or cs>=float(x.get('end',0))):ov=True;break
-        if not ov:am.append({'start':cs,'end':ce,'reason':'fb'})
+            if not(ce<=x['start'] or cs>=x['end']):ov=True;break
+        if not ov:am.append({'start':float(cs),'end':float(ce),'reason':'fb'})
         if len(am)>=tm:break
-am.sort(key=lambda x:x.get('start',0))
+
+am.sort(key=lambda x:x['start'])
 fl=[]
 for x in am:
+    xs=float(x['start']);xe=float(x['end'])
+    if xe<=xs or xe>vtd+5:continue
     ov=False
     for f in fl:
-        if not(x['end']<=f['start'] or x['start']>=f['end']):ov=True;break
-    if not ov:fl.append(x)
+        if not(xe<=f['start'] or xs>=f['end']):ov=True;break
+    if not ov:fl.append({'start':xs,'end':xe,'reason':x.get('reason','')})
     if len(fl)>=tm:break
-moments=fl[:tm] or [{'start':0,'end':DUR,'reason':'fb'}]
-print('Got '+str(len(moments))+' moments')
+moments=fl[:tm] or [{'start':0.0,'end':float(min(DUR,vtd)),'reason':'fb'}]
+print('Final moments: '+str(len(moments)))
 
 for idx,mom in enumerate(moments):
     print('SHORT '+str(idx+1)+'/'+str(len(moments)))
     st=float(mom['start']);en=float(mom['end']);durclip=en-st
+    if durclip<5:
+        print('Skip too short');continue
     msegs=[]
     for sg in sd:
         if sg['end']<st or sg['start']>en:continue
@@ -192,18 +207,18 @@ for idx,mom in enumerate(moments):
     if r:
         mt_d=pj(r)
         if mt_d:
-            ti=mt_d.get('title','')
+            ti=mt_d.get('title','') or ti
             for h in ['#Shorts','#Viral','#MrBeast','#Trending']:
                 if h.lower() not in ti.lower():ti=ti.rstrip()+' '+h
-            de=mt_d.get('description','')
+            de=mt_d.get('description','') or de
             if len(re.findall(r'#\w+',de))<15:
                 for b in ['#MrBeast','#Shorts','#Viral','#Trending','#YouTubeShorts','#ViralClip','#USA','#MustWatch','#Explore','#ShortsFeed','#FYP','#ViralVideo','#TrendingNow','#ExploreMore','#Amazing']:
                     if b.lower() not in de.lower():de+='\n'+b
-            tgd=mt_d.get('tags',[])
+            tgd=mt_d.get('tags',[]) or []
             if len(tgd)<15:
                 for b in ['shorts','viral','trending','mrbeast','youtube shorts','must watch','explore','fyp','viral clip','usa','amazing','funny','wow','best','top']:
                     if b not in tgd and len(tgd)<15:tgd.append(b)
-            tgs=', '.join(tgd)
+            if tgd:tgs=', '.join(tgd)
     print('Ti: '+ti[:80])
     
     vp='v_'+str(idx)+'.mp3'
@@ -228,6 +243,9 @@ for idx,mom in enumerate(moments):
     try:os.remove(hp)
     except:pass
     
+    if not os.path.exists(op):
+        print('Render failed');continue
+    
     tg=subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendVideo','-F','chat_id='+CID,'-F','video=@'+op,'-F','caption=Short '+str(idx+1)+'/'+str(len(moments))],capture_output=True,text=True)
     fid=None
     try:
@@ -246,12 +264,9 @@ for idx,mom in enumerate(moments):
     txt+='📄 Title: '+ti+'\n\n📝 Description: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
     subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+txt,'-d','parse_mode=Markdown','-d','reply_markup='+kb],capture_output=True,text=True)
     
-    pt='🎨 CHATGPT THUMBNAIL PROMPT for Short '+str(idx+1)+'\n\nCopy this and paste in ChatGPT:\n\nYou are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\nVIDEO TOPIC: '+re.sub(r'#\w+','',ti).strip()+'\n\nRULES:\n1. Real human face with SHOCKED or EXCITED expression\n2. BIG BOLD YELLOW text with THICK BLACK OUTLINE\n3. Large EMOJI in corner\n4. RED CIRCLE or RED ARROW pointing to key detail\n5. HIGH CONTRAST, saturated vibrant colors\n6. Format: 9:16 vertical (720x1280)\n\nSTYLES: 1-Face+Big Text+Emoji, 2-Action+Red Circle, 3-Face+Text+Red Arrow, 4-Text-Heavy+Small Face, 5-Before/After Split, 6-Dramatic Zoom+Text\n\nFor each: generate image, label "Style 1", "Style 2" etc.\nOutput all 6 images so I can compare.'
-    subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+pt],capture_output=True,text=True)
-    
     time.sleep(3)
     try:
-        os.remove(vp);os.remove(ap)
+        os.remove(vp);os.remove(ap);os.remove(op)
     except:pass
 
 print('All Done!')
