@@ -115,6 +115,31 @@ def hooktext(ti):
     h=re.sub(r'[^A-Z0-9 !?]','',h)
     return h[:25].strip() or 'WATCH THIS'
 
+def send_thumb_prompt(idx,ti):
+    topic=re.sub(r'#\w+','',ti).strip()
+    pt='🎨 CHATGPT THUMBNAIL PROMPT for Short '+str(idx+1)+'\n\n'
+    pt+='Copy this and paste in ChatGPT:\n\n'
+    pt+='You are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 DIFFERENT thumbnails for:\n\n'
+    pt+='VIDEO TOPIC: '+topic+'\n\n'
+    pt+='RULES:\n'
+    pt+='1. Real human face with SHOCKED or EXCITED expression\n'
+    pt+='2. BIG BOLD YELLOW text with THICK BLACK OUTLINE (2-3 words)\n'
+    pt+='3. Large EMOJI in corner\n'
+    pt+='4. RED CIRCLE or RED ARROW pointing to key detail\n'
+    pt+='5. HIGH CONTRAST, saturated vibrant colors\n'
+    pt+='6. Text readable on mobile, max 4 words\n'
+    pt+='7. Format: 9:16 vertical (720x1280)\n\n'
+    pt+='GENERATE THESE 6 STYLES:\n\n'
+    pt+='STYLE 1 - Face + Big Text + Emoji\n'
+    pt+='STYLE 2 - Action Frame + Red Circle\n'
+    pt+='STYLE 3 - Face + Text + Red Arrow\n'
+    pt+='STYLE 4 - Text-Heavy + Small Face\n'
+    pt+='STYLE 5 - Before/After Split\n'
+    pt+='STYLE 6 - Dramatic Zoom + Text\n\n'
+    pt+='For each: generate image, label "Style 1", "Style 2" etc.\n'
+    pt+='Output all 6 images so I can compare and choose.'
+    subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','--data-urlencode','chat_id='+CID,'--data-urlencode','text='+pt],capture_output=True,text=True)
+
 print('STEP 1: Whisper')
 m=WhisperModel('tiny',device='cpu',compute_type='int8')
 segs,_=m.transcribe('audio.wav',task='translate',word_timestamps=True)
@@ -264,7 +289,11 @@ for idx,mom in enumerate(moments):
     txt+='📄 Title: '+ti+'\n\n📝 Description: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
     subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+txt,'-d','parse_mode=Markdown','-d','reply_markup='+kb],capture_output=True,text=True)
     
-    time.sleep(3)
+    time.sleep(2)
+    send_thumb_prompt(idx,ti)
+    print('Thumb prompt sent')
+    
+    time.sleep(2)
     try:
         os.remove(vp);os.remove(ap);os.remove(op)
     except:pass
