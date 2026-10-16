@@ -8,7 +8,11 @@ on:
         type: string
       category:
         required: true
-        default: 'random'
+        default: 'space'
+        type: string
+      custom_category:
+        required: false
+        default: ''
         type: string
       num_facts:
         required: true
@@ -35,6 +39,7 @@ jobs:
           CHAT_ID: ${{ github.event.inputs.chat_id }}
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CATEGORY: ${{ github.event.inputs.category }}
+          CUSTOM_CATEGORY: ${{ github.event.inputs.custom_category }}
           NUM_FACTS: ${{ github.event.inputs.num_facts }}
           VOICE_NAME: ${{ github.event.inputs.voice_name }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
