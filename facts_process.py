@@ -110,23 +110,9 @@ def atime(s):
         s = 0
     return str(int(s // 3600)) + ':' + str(int((s % 3600) // 60)).zfill(2) + ':' + ('%05.2f' % (s % 60))
 
-# ============ Simple wrap — pura text, no truncate ============
-def wrap(t, mc=20):
-    ws = t.split()
-    ls = []
-    c = ''
-    for w in ws:
-        if len(c) + len(w) + 1 <= mc:
-            c = (c + ' ' + w).strip()
-        else:
-            if c:
-                ls.append(c)
-            c = w
-    if c:
-        ls.append(c)
-    return '\\N'.join(ls)  # SAARI LINES — koi truncate nahi
-
-def mksubs(facts, fact_timings):
+# ============ KARAOKE REVEAL CAPTIONS ============
+# Full sentence visible, current word YELLOW, past words WHITE, future words INVISIBLE
+def mksubs(facts, word_times, fact_timings):
     L = [
         '[Script Info]',
         'ScriptType: v4.00+',
@@ -137,17 +123,61 @@ def mksubs(facts, fact_timings):
         '',
         '[V4+ Styles]',
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Fact,Arial,52,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,180,1',
+        'Style: Fact,Arial,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,2,30,30,180,1',
         '',
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
     ]
-    for i, f in enumerate(facts):
-        if i < len(fact_timings):
-            start, end = fact_timings[i]
-        else:
+    
+    if not word_times:
+        # Fallback: agar word timing nahi mila to simple fact-level dikhao
+        for i, f in enumerate(facts):
+            if i < len(fact_timings):
+                s, e = fact_timings[i]
+            else:
+                s, e = 0, 2
+            L.append('Dialogue: 0,' + atime(s) + ',' + atime(e) + ',Fact,,0,0,0,,' + f.upper())
+        return '\n'.join(L)
+    
+    wi = 0
+    for i, fact in enumerate(facts):
+        fact_words = [w for w in fact.split() if w.strip()]
+        n = len(fact_words)
+        if n == 0:
             continue
-        L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + wrap(f.upper()))
+        if wi + n > len(word_times):
+            break
+        
+        for j in range(n):
+            wtime = word_times[wi + j]
+            w_start = wtime['offset']
+            w_end = wtime['offset'] + wtime['duration']
+            
+            # next word tak extend karo (thoda before)
+            if j + 1 < n:
+                next_start = word_times[wi + j + 1]['offset']
+                w_end = max(w_end, next_start - 0.02)
+            w_end = max(w_end, w_start + 0.15)
+            
+            # Har word ke liye state:
+            # k < j  → past word → WHITE visible
+            # k == j → current word → YELLOW visible
+            # k > j  → future word → INVISIBLE
+            parts = []
+            for k, w in enumerate(fact_words):
+                wu = w.upper()
+                if k < j:
+                    parts.append('{\\c&HFFFFFF&\\alpha&H00&}' + wu)
+                elif k == j:
+                    parts.append('{\\c&H00FFFF&\\alpha&H00&}' + wu)
+                else:
+                    parts.append('{\\c&HFFFFFF&\\alpha&HFF&}' + wu)
+            
+            full_text = ' '.join(parts)
+            L.append('Dialogue: 0,' + atime(w_start) + ',' + atime(w_end) + ',Fact,,0,0,0,,' + full_text)
+        
+        wi += n
+    
     return '\n'.join(L)
 
 def sb(fid,ti,de,tg):
@@ -179,10 +209,10 @@ p+='1. Each fact MUST connect to the previous one\n'
 p+='2. Fact 2 should build on Fact 1, Fact 3 on Fact 2, etc.\n'
 p+='3. They should feel like chapters of a single story\n'
 p+='4. NO random unrelated facts\n'
-p+='5. Each fact: 8-12 words maximum\n'
+p+='5. Each fact: 6-9 words maximum (SHORT!)\n'
 p+='6. Shocking, interesting, viral-worthy\n\n'
 p+='Example flow (space):\n'
-p+='"Space is completely silent" -> "But astronauts hear their heartbeat" -> "That heartbeat can reach 150 BPM" -> "So astronauts train underwater for hours" -> "That training is called the pool of fear"\n\n'
+p+='"Space is completely silent" -> "But astronauts hear their heartbeat" -> "It can reach 150 BPM" -> "So they train underwater" -> "That pool is called fear"\n\n'
 p+='Return JSON: {"facts":["fact1","fact2",...]}'
 r=gq(p,1200,0.85,True)
 facts=[]
@@ -207,11 +237,11 @@ if not os.path.exists(vp) or os.path.getsize(vp) < 1000:
 atd=probe(vp)
 print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
 
-# ============ Map words to facts (accurate timing) ============
+# fact timings (fallback ke liye)
 fact_timings = []
 if word_times:
     wi = 0
-    for i, fact in enumerate(facts):
+    for fact in facts:
         fw = [w for w in fact.split() if w.strip()]
         n = len(fw)
         if n == 0:
@@ -231,9 +261,6 @@ if word_times:
 else:
     pt = atd / max(len(facts), 1)
     fact_timings = [(i * pt, (i + 1) * pt) for i in range(len(facts))]
-
-for i, t in enumerate(fact_timings):
-    print('Fact ' + str(i+1) + ' timing: ' + str(round(t[0], 2)) + 's - ' + str(round(t[1], 2)) + 's')
 
 print('STEP 3: Download stock videos')
 urls=get_vids(kw,NF)
@@ -255,12 +282,12 @@ print('Clips: '+str(len(clips)))
 if len(clips)<2:
     print('Not enough clips');exit(1)
 
-print('STEP 5: Concat + captions')
+print('STEP 5: Concat + karaoke captions')
 open('l.txt','w').write('\n'.join("file '"+os.path.abspath(c)+"'" for c in clips))
 subprocess.run(['ffmpeg','-y','-f','concat','-safe','0','-i','l.txt','-c','copy','raw.mp4'],capture_output=True)
 
 ap='s.ass'
-open(ap,'w',encoding='utf-8').write(mksubs(facts, fact_timings))
+open(ap,'w',encoding='utf-8').write(mksubs(facts, word_times, fact_timings))
 
 op='facts_short.mp4'
 subprocess.run(['ffmpeg','-y','-i','raw.mp4','-i',vp,'-filter_complex','[0:v]ass='+ap+'[v];[1:a]volume=1.0[a]','-map','[v]','-map','[a]','-shortest','-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',op],capture_output=True)
