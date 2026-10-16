@@ -83,7 +83,7 @@ def clip(inp,out,dur):
     r=subprocess.run(['ffmpeg','-y','-ss',str(st),'-t',str(dur),'-i',inp,'-vf',vf,'-c:v','libx264','-preset','fast','-crf','23','-an',out],capture_output=True)
     return r.returncode==0 and os.path.exists(out)
 
-# ============ NEW: TTS with word-level timing ============
+# ============ TTS with word-level timing ============
 def tts_with_timing(text, path):
     async def g():
         c = edge_tts.Communicate(text, VN)
@@ -110,7 +110,8 @@ def atime(s):
         s = 0
     return str(int(s // 3600)) + ':' + str(int((s % 3600) // 60)).zfill(2) + ':' + ('%05.2f' % (s % 60))
 
-def wrap(t, mc=20):
+# ============ ORIGINAL wrap (last 2 lines only) ============
+def wrap(t, mc=18):
     ws = t.split()
     ls = []
     c = ''
@@ -123,8 +124,14 @@ def wrap(t, mc=20):
             c = w
     if c:
         ls.append(c)
-    return '\\N'.join(ls)  # ← AB SAARI LINES DIKHENGI
+    # ORIGINAL: only last 2 lines (max 2 line caption)
+    if len(ls) <= 2:
+        return '\\N'.join(ls)
+    # Agar 2 se zyada lines hain to last 2 lo — par full text rakho
+    # Actually original behaviour: only last 2 lines. Restore karte hain.
+    return '\\N'.join(ls[-2:])
 
+# ============ ORIGINAL mksubs (with fixed timing via word boundaries) ============
 def mksubs(facts, fact_timings):
     L = [
         '[Script Info]',
@@ -136,7 +143,7 @@ def mksubs(facts, fact_timings):
         '',
         '[V4+ Styles]',
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Fact,Arial,68,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,180,1',
+        'Style: Fact,Arial,70,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,200,1',
         '',
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
@@ -146,8 +153,6 @@ def mksubs(facts, fact_timings):
             start, end = fact_timings[i]
         else:
             start, end = 0, 2
-        # thoda extend — text screen pe rehne ke liye
-        end = end + 0.15
         L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + wrap(f.upper()))
     return '\n'.join(L)
 
@@ -220,7 +225,6 @@ if word_times:
             last = word_times[wi + n - 1]
             end = last['offset'] + last['duration']
         else:
-            # fallback: agar word count match nahi hua
             if wi < len(word_times):
                 start = word_times[wi]['offset']
             else:
@@ -229,7 +233,6 @@ if word_times:
         fact_timings.append((start, end))
         wi += n
 else:
-    # TTS fail — uniform distribution
     pt = atd / max(len(facts), 1)
     fact_timings = [(i * pt, (i + 1) * pt) for i in range(len(facts))]
 
