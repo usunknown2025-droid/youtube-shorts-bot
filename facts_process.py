@@ -5,21 +5,22 @@ GK=os.environ['GROQ_API_KEY']
 CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
 VN=os.environ.get('VOICE_NAME','en-GB-RyanNeural')
-CAT=os.environ.get('CATEGORY','random')
+CAT=os.environ.get('CATEGORY','space')
+CUSTOM_CAT=os.environ.get('CUSTOM_CATEGORY','')
 NF=int(os.environ.get('NUM_FACTS','5'))
 PK=os.environ.get('PIXABAY_API_KEY','')
 SU=os.environ.get('SUPABASE_URL','').rstrip('/')
 SK=os.environ.get('SUPABASE_KEY','')
 
 CAT_KW={
-'space':'galaxy nebula stars planets cosmos',
-'animals':'wildlife nature animals ocean',
-'history':'ancient ruins old architecture',
-'science':'laboratory molecules technology',
-'random':'nature universe mystery'
+'space':'galaxy nebula stars planets cosmos space',
+'animals':'wildlife nature animals ocean forest',
+'history':'ancient ruins old architecture historical',
+'science':'laboratory molecules technology science',
+'funny':'funny cats dogs comedy cute animals'
 }
 
-def gq(p,mt=1500,t=0.8,jm=False):
+def gq(p,mt=1500,t=0.85,jm=False):
     u='https://api.groq.com/openai/v1/chat/completions'
     h={'Authorization':'Bearer '+GK,'Content-Type':'application/json'}
     pl={'model':'openai/gpt-oss-120b','messages':[{'role':'user','content':p}],'temperature':t,'max_tokens':mt}
@@ -104,8 +105,8 @@ def wrap(t,mc=18):
     if c:ls.append(c)
     return '\\N'.join(ls[-2:])
 
-def mksubs(facts,total,atd):
-    L=['[Script Info]','ScriptType: v4.00+','PlayResX: 720','PlayResY: 1280','WrapStyle: 0','ScaledBorderAndShadow: yes','','[V4+ Styles]','Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding','Style: Fact,Arial,75,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,200,1','','[Events]','Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text']
+def mksubs(facts,atd):
+    L=['[Script Info]','ScriptType: v4.00+','PlayResX: 720','PlayResY: 1280','WrapStyle: 0','ScaledBorderAndShadow: yes','','[V4+ Styles]','Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding','Style: Fact,Arial,70,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,200,1','','[Events]','Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text']
     pt=atd/len(facts)
     for i,f in enumerate(facts):
         L.append('Dialogue: 0,'+atime(i*pt)+','+atime((i+1)*pt)+',Fact,,0,0,0,,'+wrap(f.upper()))
@@ -114,25 +115,44 @@ def mksubs(facts,total,atd):
 def sb(fid,ti,de,tg):
     u=SU+'/rest/v1/pending_shorts'
     h={'apikey':SK,'Authorization':'Bearer '+SK,'Content-Type':'application/json','Prefer':'return=representation'}
-    data={'chat_id':CID,'file_id':fid,'title':ti,'description':de,'tags':tg,'status':'pending','short_number':1,'upload_status':'pending','content_type':'facts','script':'facts','voice_style':VN}
+    data={'chat_id':CID,'file_id':fid,'title':ti,'description':de,'tags':tg,'status':'pending','short_number':1,'upload_status':'pending','content_type':'facts','script':CAT,'voice_style':VN}
     try:
         r=requests.post(u,headers=h,json=data,timeout=30).json()
         if isinstance(r,list) and r:return r[0].get('id')
     except:pass
     return None
 
-print('FACTS GENERATOR')
+print('FACTS GENERATOR (Connected)')
 print('Category: '+CAT+' Facts: '+str(NF))
 
-print('STEP 1: Generate facts')
-p='Generate '+str(NF)+' SHOCKING interesting facts about '+CAT+'. Each fact: 12-18 words. Return JSON: {"facts":["fact1","fact2"]}'
-r=gq(p,1000,0.85,True)
+if CUSTOM_CAT:
+    topic_name=CUSTOM_CAT
+    kw=CUSTOM_CAT+' nature mystery'
+else:
+    topic_name=CAT
+    kw=CAT_KW.get(CAT,'nature universe')
+
+print('Topic: '+topic_name)
+
+print('STEP 1: Generate connected facts')
+p='Generate '+str(NF)+' CONNECTED facts about "'+topic_name+'" that flow like a mini-story.\n\n'
+p+='CRITICAL RULES:\n'
+p+='1. Each fact MUST connect to the previous one\n'
+p+='2. Fact 2 should build on Fact 1, Fact 3 on Fact 2, etc.\n'
+p+='3. They should feel like chapters of a single story\n'
+p+='4. NO random unrelated facts\n'
+p+='5. Each fact: 12-18 words maximum\n'
+p+='6. Shocking, interesting, viral-worthy\n\n'
+p+='Example flow (space):\n'
+p+='"Space is completely silent" -> "But astronauts can hear their heartbeat" -> "That heartbeat can reach 150 BPM" -> "So astronauts train 200+ hours underwater" -> "That training is called the pool of fear"\n\n'
+p+='Return JSON: {"facts":["fact1","fact2",...]}'
+r=gq(p,1200,0.85,True)
 facts=[]
 if r:
     d=pj(r)
     if d:facts=d.get('facts',[])
 if not facts:
-    facts=['The Sun weighs 330,000 times more than Earth','A day on Venus is longer than a year','There are more stars than grains of sand on Earth']
+    facts=['Fact 1 about '+topic_name,'Fact 2 building on fact 1','Fact 3 continuing the story','Fact 4 adds detail','Fact 5 concludes']
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
 
@@ -145,7 +165,6 @@ atd=probe(vp)
 print('Audio: '+str(round(atd,1))+'s')
 
 print('STEP 3: Download stock videos')
-kw=CAT_KW.get(CAT,'nature universe')
 urls=get_vids(kw,NF)
 print('Got '+str(len(urls))+' videos')
 
@@ -170,7 +189,7 @@ open('l.txt','w').write('\n'.join("file '"+os.path.abspath(c)+"'" for c in clips
 subprocess.run(['ffmpeg','-y','-f','concat','-safe','0','-i','l.txt','-c','copy','raw.mp4'],capture_output=True)
 
 ap='s.ass'
-open(ap,'w',encoding='utf-8').write(mksubs(facts,atd,atd))
+open(ap,'w',encoding='utf-8').write(mksubs(facts,atd))
 
 op='facts_short.mp4'
 subprocess.run(['ffmpeg','-y','-i','raw.mp4','-i',vp,'-filter_complex','[0:v]ass='+ap+'[v];[1:a]volume=1.0[a]','-map','[v]','-map','[a]','-shortest','-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',op],capture_output=True)
@@ -186,10 +205,10 @@ if not os.path.exists(op):
 print('Video: '+op)
 
 print('STEP 6: Metadata')
-tp='YouTube Shorts metadata for facts video about '+CAT+'. Title catchy max 60 + end "#Shorts #Viral #MrBeast #Trending". Desc: 2 lines + blank + 15 hashtags. Tags: 15 min. Return JSON: {"title":"...","description":"...","tags":["t1"]}'
-ti=CAT.title()+' Facts #Shorts #Viral #MrBeast #Trending'
-de='Mind-blowing '+CAT+' facts!\n\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing'
-tgs='facts, '+CAT+', shorts, viral, trending, mrbeast, youtube shorts, must watch, explore, fyp, amazing, interesting, science, education, top'
+tp='YouTube Shorts metadata for "'+topic_name+'" facts video. Title catchy max 60 + end "#Shorts #Viral #MrBeast #Trending". Desc: 2-3 lines + blank + 15 hashtags. Tags: 15 min. Return JSON: {"title":"...","description":"...","tags":["t1"]}'
+ti=topic_name.title()+' Facts #Shorts #Viral #MrBeast #Trending'
+de='Mind-blowing '+topic_name+' facts!\n\n#MrBeast #Shorts #Viral #Trending #YouTubeShorts #ViralClip #USA #MustWatch #Explore #ShortsFeed #FYP #ViralVideo #TrendingNow #ExploreMore #Amazing'
+tgs='facts, '+topic_name+', shorts, viral, trending, mrbeast, youtube shorts, must watch, explore, fyp, amazing, interesting, science, education, top'
 r=gq(tp,900,0.5,True)
 if r:
     md=pj(r)
@@ -209,7 +228,7 @@ if r:
 print('Title: '+ti[:80])
 
 print('STEP 7: Send to Telegram')
-tg=subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendVideo','-F','chat_id='+CID,'-F','video=@'+op,'-F','caption='+CAT.title()+' Facts - '+str(NF)+' facts'],capture_output=True,text=True)
+tg=subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendVideo','-F','chat_id='+CID,'-F','video=@'+op,'-F','caption='+topic_name.title()+' Facts - '+str(NF)+' facts'],capture_output=True,text=True)
 fid=None
 try:
     j=json.loads(tg.stdout)
@@ -221,7 +240,7 @@ if fid:
     print('Row: '+str(rid))
     if rid:
         kb=json.dumps({'inline_keyboard':[[{'text':'✅ Upload','callback_data':'approve_'+str(rid)},{'text':'📅 Schedule','callback_data':'schedule_'+str(rid)}],[{'text':'✏️ Custom','callback_data':'custom_'+str(rid)},{'text':'❌ Skip','callback_data':'skip_'+str(rid)}]]})
-        txt='📝 *'+CAT.title()+' Facts*\n\n📄 Title: '+ti+'\n\n📝 Desc: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
+        txt='📝 *'+topic_name.title()+' Facts*\n\n📄 Title: '+ti+'\n\n📝 Desc: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
         subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+txt,'-d','parse_mode=Markdown','-d','reply_markup='+kb],capture_output=True,text=True)
         
         pt='🎨 CHATGPT THUMBNAIL PROMPT\n\nCopy this and paste in ChatGPT:\n\nYou are a MrBeast-style YouTube Shorts thumbnail designer. Generate 6 thumbnails for:\n\nVIDEO TOPIC: '+re.sub(r'#\w+','',ti).strip()+'\n\nRULES:\n1. Real human face SHOCKED\n2. BIG BOLD YELLOW text THICK BLACK OUTLINE\n3. Large EMOJI corner\n4. RED CIRCLE or ARROW\n5. HIGH CONTRAST vibrant\n6. Format: 9:16 vertical\n\nSTYLES: Face+Text+Emoji, Action+Circle, Face+Arrow, Text-Heavy, Before/After, Zoom+Text\n\nOutput all 6 images.'
