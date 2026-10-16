@@ -204,16 +204,11 @@ def mksubs(facts, word_times, fact_timings):
         '',
         '[V4+ Styles]',
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Fact,DejaVu Sans,56,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,2,2,30,30,200,1',
+        'Style: Fact,DejaVu Sans,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,3,2,25,25,350,1',
         '',
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
     ]
-    all_words = []
-    for fact in facts:
-        for w in fact.split():
-            if w.strip():
-                all_words.append(w)
     if not word_times:
         for i, f in enumerate(facts):
             if i < len(fact_timings):
@@ -222,21 +217,33 @@ def mksubs(facts, word_times, fact_timings):
                 s, e = 0, 2
             L.append('Dialogue: 0,' + atime(s) + ',' + atime(e) + ',Fact,,0,0,0,,' + f.upper())
         return '\n'.join(L)
+    all_words = []
+    for fact in facts:
+        for w in fact.split():
+            if w.strip():
+                all_words.append(w)
     CHUNK = 3
     for i in range(0, len(all_words), CHUNK):
         chunk = all_words[i:i+CHUNK]
         if i + len(chunk) - 1 >= len(word_times):
             break
-        start = word_times[i]['offset']
-        last = word_times[i + len(chunk) - 1]
-        end = last['offset'] + last['duration'] + 0.05
-        text = ' '.join(w.upper() for w in chunk)
-        if len(text) > 22:
-            mid = (len(chunk) + 1) // 2
-            line1 = ' '.join(w.upper() for w in chunk[:mid])
-            line2 = ' '.join(w.upper() for w in chunk[mid:])
-            text = line1 + '\\N' + line2
-        L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + text)
+        for j in range(len(chunk)):
+            wt = word_times[i + j]
+            start = wt['offset']
+            if j + 1 < len(chunk):
+                end = word_times[i + j + 1]['offset']
+            else:
+                end = wt['offset'] + wt['duration'] + 0.15
+            end = max(end, start + 0.15)
+            parts = []
+            for k, w in enumerate(chunk):
+                wu = w.upper()
+                if k == j:
+                    parts.append('{\\c&H0000FFFF&}' + wu + '{\\c&H00FFFFFF&}')
+                else:
+                    parts.append('{\\c&H00FFFFFF&}' + wu)
+            text = ' '.join(parts)
+            L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + text)
     return '\n'.join(L)
 
 def sb(fid,ti,de,tg):
