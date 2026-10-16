@@ -110,29 +110,8 @@ def atime(s):
         s = 0
     return str(int(s // 3600)) + ':' + str(int((s % 3600) // 60)).zfill(2) + ':' + ('%05.2f' % (s % 60))
 
-# ============ ORIGINAL wrap (last 2 lines only) ============
-def wrap(t, mc=18):
-    ws = t.split()
-    ls = []
-    c = ''
-    for w in ws:
-        if len(c) + len(w) + 1 <= mc:
-            c = (c + ' ' + w).strip()
-        else:
-            if c:
-                ls.append(c)
-            c = w
-    if c:
-        ls.append(c)
-    # ORIGINAL: only last 2 lines (max 2 line caption)
-    if len(ls) <= 2:
-        return '\\N'.join(ls)
-    # Agar 2 se zyada lines hain to last 2 lo — par full text rakho
-    # Actually original behaviour: only last 2 lines. Restore karte hain.
-    return '\\N'.join(ls[-2:])
-
-# ============ ORIGINAL mksubs (with fixed timing via word boundaries) ============
-def mksubs(facts, fact_timings):
+# ============ KARAOKE CAPTIONS — Word-by-word highlight ============
+def mksubs(facts, word_times):
     L = [
         '[Script Info]',
         'ScriptType: v4.00+',
@@ -143,17 +122,40 @@ def mksubs(facts, fact_timings):
         '',
         '[V4+ Styles]',
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Fact,Arial,70,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,200,1',
+        # PrimaryColour = Yellow (after spoken = highlighted)
+        # SecondaryColour = White (before spoken = not yet said)
+        'Style: Fact,Arial,58,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,200,1',
         '',
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
     ]
-    for i, f in enumerate(facts):
-        if i < len(fact_timings):
-            start, end = fact_timings[i]
-        else:
-            start, end = 0, 2
-        L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + wrap(f.upper()))
+    
+    wi = 0
+    for i, fact in enumerate(facts):
+        words = [w for w in fact.split() if w.strip()]
+        n = len(words)
+        if n == 0:
+            continue
+        # agar word_times khatam ho gaye
+        if wi + n > len(word_times):
+            break
+        
+        start = word_times[wi]['offset']
+        last = word_times[wi + n - 1]
+        end = last['offset'] + last['duration'] + 0.25  # chhota tail
+        
+        # Karaoke tags — har word ke aage \k<duration_in_centiseconds>
+        parts = []
+        for j, w in enumerate(words):
+            dur_cs = int(word_times[wi + j]['duration'] * 100)
+            if dur_cs < 1:
+                dur_cs = 1
+            parts.append('{\\k' + str(dur_cs) + '}' + w)
+        
+        ktext = ' '.join(parts)
+        L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + ktext)
+        wi += n
+    
     return '\n'.join(L)
 
 def sb(fid,ti,de,tg):
@@ -200,7 +202,7 @@ if not facts:
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
 
-print('STEP 2: Voiceover with timing')
+print('STEP 2: Voiceover with word timing')
 vp='voice.mp3'
 full='. '.join(facts)+'.'
 word_times = tts_with_timing(full, vp)
@@ -212,32 +214,6 @@ if not os.path.exists(vp) or os.path.getsize(vp) < 1000:
 
 atd=probe(vp)
 print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
-
-# ============ Map words to facts ============
-fact_timings = []
-if word_times:
-    wi = 0
-    for fact in facts:
-        fw = [w for w in fact.split() if w.strip()]
-        n = len(fw)
-        if wi + n <= len(word_times):
-            start = word_times[wi]['offset']
-            last = word_times[wi + n - 1]
-            end = last['offset'] + last['duration']
-        else:
-            if wi < len(word_times):
-                start = word_times[wi]['offset']
-            else:
-                start = 0
-            end = start + 2.0
-        fact_timings.append((start, end))
-        wi += n
-else:
-    pt = atd / max(len(facts), 1)
-    fact_timings = [(i * pt, (i + 1) * pt) for i in range(len(facts))]
-
-for i, t in enumerate(fact_timings):
-    print('Fact ' + str(i+1) + ' timing: ' + str(round(t[0], 2)) + 's - ' + str(round(t[1], 2)) + 's')
 
 print('STEP 3: Download stock videos')
 urls=get_vids(kw,NF)
@@ -259,12 +235,12 @@ print('Clips: '+str(len(clips)))
 if len(clips)<2:
     print('Not enough clips');exit(1)
 
-print('STEP 5: Concat + captions')
+print('STEP 5: Concat + karaoke captions')
 open('l.txt','w').write('\n'.join("file '"+os.path.abspath(c)+"'" for c in clips))
 subprocess.run(['ffmpeg','-y','-f','concat','-safe','0','-i','l.txt','-c','copy','raw.mp4'],capture_output=True)
 
 ap='s.ass'
-open(ap,'w',encoding='utf-8').write(mksubs(facts, fact_timings))
+open(ap,'w',encoding='utf-8').write(mksubs(facts, word_times))
 
 op='facts_short.mp4'
 subprocess.run(['ffmpeg','-y','-i','raw.mp4','-i',vp,'-filter_complex','[0:v]ass='+ap+'[v];[1:a]volume=1.0[a]','-map','[v]','-map','[a]','-shortest','-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',op],capture_output=True)
