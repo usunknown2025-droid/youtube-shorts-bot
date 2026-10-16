@@ -104,12 +104,25 @@ def tts_with_timing(text, path):
         print('TTS error: ' + str(e))
         return []
 
+def estimate_word_times(text, total_duration):
+    words = [w for w in text.split() if w.strip()]
+    if not words:
+        return []
+    total_weight = sum(len(w) + 1 for w in words)
+    times = []
+    t = 0.0
+    for w in words:
+        dur = ((len(w) + 1) / total_weight) * total_duration
+        times.append({'text': w, 'offset': t, 'duration': dur})
+        t += dur
+    return times
+
 def atime(s):
     if s < 0:
         s = 0
     return str(int(s // 3600)) + ':' + str(int((s % 3600) // 60)).zfill(2) + ':' + ('%05.2f' % (s % 60))
 
-def get_used_facts(topic, limit=100):
+def get_used_facts(topic, limit=200):
     if not SU or not SK:
         return []
     try:
@@ -158,6 +171,11 @@ def mksubs(facts, word_times, fact_timings):
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
     ]
+    all_words = []
+    for fact in facts:
+        for w in fact.split():
+            if w.strip():
+                all_words.append(w)
     if not word_times:
         for i, f in enumerate(facts):
             if i < len(fact_timings):
@@ -166,11 +184,6 @@ def mksubs(facts, word_times, fact_timings):
                 s, e = 0, 2
             L.append('Dialogue: 0,' + atime(s) + ',' + atime(e) + ',Fact,,0,0,0,,' + f.upper())
         return '\n'.join(L)
-    all_words = []
-    for fact in facts:
-        for w in fact.split():
-            if w.strip():
-                all_words.append(w)
     CHUNK = 3
     for i in range(0, len(all_words), CHUNK):
         chunk = all_words[i:i+CHUNK]
@@ -211,7 +224,7 @@ else:
 print('Topic: '+topic_name)
 
 print('Fetching previously used facts...')
-used_facts = get_used_facts(topic_name, 100)
+used_facts = get_used_facts(topic_name, 200)
 print('Already used: ' + str(len(used_facts)) + ' facts')
 
 print('STEP 1: Generate connected facts')
@@ -227,10 +240,9 @@ p += '5. Each fact: 6-9 words maximum (SHORT!)\n'
 p += '6. Shocking, interesting, viral-worthy\n\n'
 if used_facts:
     p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
-    for u in used_facts[:60]:
+    for u in used_facts[:80]:
         p += '- ' + u + '\n'
-    p += '\n'
-    p += 'Generate COMPLETELY NEW and UNIQUE facts that have NOT been covered before.\n\n'
+    p += '\nGenerate COMPLETELY NEW and UNIQUE facts that have NOT been covered before.\n\n'
 p += 'Example flow (space):\n'
 p += '"Space is completely silent" -> "But astronauts hear their heartbeat" -> "It can reach 150 BPM" -> "So they train underwater" -> "That pool is called fear"\n\n'
 p += 'Return JSON: {"facts":["fact1","fact2",...]}'
@@ -275,6 +287,10 @@ if not os.path.exists(vp) or os.path.getsize(vp) < 1000:
     word_times = []
 atd=probe(vp)
 print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
+if not word_times:
+    print('Word boundaries missing — estimating from duration')
+    word_times = estimate_word_times(full, atd)
+    print('Estimated ' + str(len(word_times)) + ' word timings')
 
 fact_timings = []
 if word_times:
