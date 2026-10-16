@@ -83,7 +83,6 @@ def clip(inp,out,dur):
     r=subprocess.run(['ffmpeg','-y','-ss',str(st),'-t',str(dur),'-i',inp,'-vf',vf,'-c:v','libx264','-preset','fast','-crf','23','-an',out],capture_output=True)
     return r.returncode==0 and os.path.exists(out)
 
-# ============ TTS with word-level timing ============
 def tts_with_timing(text, path):
     async def g():
         c = edge_tts.Communicate(text, VN)
@@ -110,8 +109,41 @@ def atime(s):
         s = 0
     return str(int(s // 3600)) + ':' + str(int((s % 3600) // 60)).zfill(2) + ':' + ('%05.2f' % (s % 60))
 
-# ============ KARAOKE REVEAL CAPTIONS ============
-# Full sentence visible, current word YELLOW, past words WHITE, future words INVISIBLE
+# ============ USED FACTS TRACKING ============
+def get_used_facts(topic, limit=100):
+    if not SU or not SK:
+        return []
+    try:
+        r = requests.get(
+            SU + '/rest/v1/used_facts',
+            headers={'apikey': SK, 'Authorization': 'Bearer ' + SK},
+            params={'topic': 'eq.' + topic, 'select': 'fact_text', 'order': 'created_at.desc', 'limit': str(limit)},
+            timeout=30
+        ).json()
+        if isinstance(r, list):
+            return [item.get('fact_text', '') for item in r if item.get('fact_text')]
+    except Exception as e:
+        print('Used facts fetch error: ' + str(e))
+    return []
+
+def save_used_facts(topic, facts):
+    if not SU or not SK:
+        return
+    rows = [{'topic': topic, 'fact_text': f} for f in facts if f]
+    if not rows:
+        return
+    try:
+        requests.post(
+            SU + '/rest/v1/used_facts',
+            headers={'apikey': SK, 'Authorization': 'Bearer ' + SK, 'Content-Type': 'application/json'},
+            json=rows,
+            timeout=30
+        )
+        print('Saved ' + str(len(rows)) + ' facts to history')
+    except Exception as e:
+        print('Save used facts error: ' + str(e))
+
+# ============ KARAOKE CAPTIONS ============
 def mksubs(facts, word_times, fact_timings):
     L = [
         '[Script Info]',
@@ -130,7 +162,6 @@ def mksubs(facts, word_times, fact_timings):
     ]
     
     if not word_times:
-        # Fallback: agar word timing nahi mila to simple fact-level dikhao
         for i, f in enumerate(facts):
             if i < len(fact_timings):
                 s, e = fact_timings[i]
@@ -152,17 +183,11 @@ def mksubs(facts, word_times, fact_timings):
             wtime = word_times[wi + j]
             w_start = wtime['offset']
             w_end = wtime['offset'] + wtime['duration']
-            
-            # next word tak extend karo (thoda before)
             if j + 1 < n:
                 next_start = word_times[wi + j + 1]['offset']
                 w_end = max(w_end, next_start - 0.02)
             w_end = max(w_end, w_start + 0.15)
             
-            # Har word ke liye state:
-            # k < j  → past word → WHITE visible
-            # k == j → current word → YELLOW visible
-            # k > j  → future word → INVISIBLE
             parts = []
             for k, w in enumerate(fact_words):
                 wu = w.upper()
@@ -202,23 +227,66 @@ else:
 
 print('Topic: '+topic_name)
 
+# ============ FETCH PREVIOUSLY USED FACTS ============
+print('Fetching previously used facts...')
+used_facts = get_used_facts(topic_name, 100)
+print('Already used: ' + str(len(used_facts)) + ' facts')
+
 print('STEP 1: Generate connected facts')
-p='Generate '+str(NF)+' CONNECTED facts about "'+topic_name+'" that flow like a mini-story.\n\n'
-p+='CRITICAL RULES:\n'
-p+='1. Each fact MUST connect to the previous one\n'
-p+='2. Fact 2 should build on Fact 1, Fact 3 on Fact 2, etc.\n'
-p+='3. They should feel like chapters of a single story\n'
-p+='4. NO random unrelated facts\n'
-p+='5. Each fact: 6-9 words maximum (SHORT!)\n'
-p+='6. Shocking, interesting, viral-worthy\n\n'
-p+='Example flow (space):\n'
-p+='"Space is completely silent" -> "But astronauts hear their heartbeat" -> "It can reach 150 BPM" -> "So they train underwater" -> "That pool is called fear"\n\n'
-p+='Return JSON: {"facts":["fact1","fact2",...]}'
-r=gq(p,1200,0.85,True)
+seed = random.randint(10000, 99999)
+p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + topic_name + '" that flow like a mini-story.\n\n'
+p += 'Random seed for variety: ' + str(seed) + '\n\n'
+p += 'CRITICAL RULES:\n'
+p += '1. Each fact MUST connect to the previous one\n'
+p += '2. Fact 2 should build on Fact 1, Fact 3 on Fact 2, etc.\n'
+p += '3. They should feel like chapters of a single story\n'
+p += '4. NO random unrelated facts\n'
+p += '5. Each fact: 6-9 words maximum (SHORT!)\n'
+p += '6. Shocking, interesting, viral-worthy\n\n'
+
+if used_facts:
+    p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
+    for u in used_facts[:60]:
+        p += '- ' + u + '\n'
+    p += '\n'
+    p += 'Generate COMPLETELY NEW and UNIQUE facts that have NOT been covered before.\n\n'
+
+p += 'Example flow (space):\n'
+p += '"Space is completely silent" -> "But astronauts hear their heartbeat" -> "It can reach 150 BPM" -> "So they train underwater" -> "That pool is called fear"\n\n'
+p += 'Return JSON: {"facts":["fact1","fact2",...]}'
+
+r=gq(p,1200,0.95,True)
 facts=[]
 if r:
     d=pj(r)
     if d:facts=d.get('facts',[])
+
+# Duplicate check against used_facts
+if facts and used_facts:
+    used_lower = [u.lower().strip() for u in used_facts]
+    fresh = []
+    for f in facts:
+        fl = f.lower().strip()
+        # exact match check
+        if fl in used_lower:
+            print('SKIPPED (duplicate): ' + f)
+            continue
+        fresh.append(f)
+    
+    # agar sab duplicates the to phir se generate karo
+    if len(fresh) < NF:
+        print('Only ' + str(len(fresh)) + ' fresh facts, regenerating...')
+        p2 = p + '\n\nYour previous output was mostly duplicates. Generate entirely different facts.'
+        r2 = gq(p2, 1200, 1.0, True)
+        if r2:
+            d2 = pj(r2)
+            if d2:
+                facts = d2.get('facts', [])
+        else:
+            facts = fresh
+    else:
+        facts = fresh
+
 if not facts:
     facts=['Fact 1 about '+topic_name,'Fact 2 building on fact 1','Fact 3 continuing the story','Fact 4 adds detail','Fact 5 concludes']
 facts=facts[:NF]
@@ -237,7 +305,6 @@ if not os.path.exists(vp) or os.path.getsize(vp) < 1000:
 atd=probe(vp)
 print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
 
-# fact timings (fallback ke liye)
 fact_timings = []
 if word_times:
     wi = 0
@@ -302,7 +369,10 @@ if not os.path.exists(op):
     print('Render failed');exit(1)
 print('Video: '+op)
 
-print('STEP 6: Metadata')
+print('STEP 6: Save used facts to history')
+save_used_facts(topic_name, facts)
+
+print('STEP 7: Metadata')
 
 FACTS_TAGS = {
     'space': ['space facts', 'universe', 'galaxy', 'astronomy', 'cosmos', 'nasa', 'planets', 'stars', 'space exploration', 'science facts', 'did you know', 'educational', 'space science', 'cosmology', 'astrophysics'],
@@ -374,7 +444,7 @@ if r:
 print('Title: ' + ti[:80])
 print('Tags: ' + tgs[:80])
 
-print('STEP 7: Send to Telegram')
+print('STEP 8: Send to Telegram')
 tg=subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendVideo','-F','chat_id='+CID,'-F','video=@'+op,'-F','caption='+topic_name.title()+' Facts - '+str(NF)+' facts'],capture_output=True,text=True)
 fid=None
 try:
@@ -389,7 +459,7 @@ if fid:
         kb=json.dumps({'inline_keyboard':[[{'text':'✅ Upload','callback_data':'approve_'+str(rid)},{'text':'📅 Schedule','callback_data':'schedule_'+str(rid)}],[{'text':'✏️ Custom','callback_data':'custom_'+str(rid)},{'text':'❌ Skip','callback_data':'skip_'+str(rid)}]]})
         txt='📝 *'+topic_name.title()+' Facts*\n\n📄 Title: '+ti+'\n\n📝 Desc: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
         subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+txt,'-d','parse_mode=Markdown','-d','reply_markup='+kb],capture_output=True,text=True)
-
+        
         pt='🎨 CHATGPT THUMBNAIL PROMPT\n\nCopy this and paste in ChatGPT:\n\nYou are a YouTube Shorts thumbnail designer for a FACTS channel. Generate 6 thumbnails for:\n\nVIDEO TOPIC: '+re.sub(r'#\w+','',ti).strip()+'\n\nRULES:\n1. NO human faces — use only subject imagery, objects, animals, historical figures, nature, or 3D renders relevant to the topic\n2. BIG BOLD YELLOW text with THICK BLACK OUTLINE\n3. Large EMOJI in corner (😱🤯😮💥🔥)\n4. RED CIRCLE or ARROW highlighting an interesting detail\n5. HIGH CONTRAST vibrant colors\n6. Ultra-detailed, cinematic, hyper-realistic\n7. Format: 9:16 vertical\n\nSTYLES: Subject+Text+Emoji, Action+Circle, Object+Arrow, Text-Heavy, Before/After, Zoom+Detail\n\nOutput all 6 images.'
         subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','--data-urlencode','chat_id='+CID,'--data-urlencode','text='+pt],capture_output=True,text=True)
 
@@ -397,3 +467,4 @@ try:os.remove(vp);os.remove(op)
 except:pass
 
 print('All Done!')
+```
