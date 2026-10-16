@@ -110,8 +110,23 @@ def atime(s):
         s = 0
     return str(int(s // 3600)) + ':' + str(int((s % 3600) // 60)).zfill(2) + ':' + ('%05.2f' % (s % 60))
 
-# ============ KARAOKE CAPTIONS — Word-by-word highlight ============
-def mksubs(facts, word_times):
+# ============ Simple wrap — pura text, no truncate ============
+def wrap(t, mc=20):
+    ws = t.split()
+    ls = []
+    c = ''
+    for w in ws:
+        if len(c) + len(w) + 1 <= mc:
+            c = (c + ' ' + w).strip()
+        else:
+            if c:
+                ls.append(c)
+            c = w
+    if c:
+        ls.append(c)
+    return '\\N'.join(ls)  # SAARI LINES — koi truncate nahi
+
+def mksubs(facts, fact_timings):
     L = [
         '[Script Info]',
         'ScriptType: v4.00+',
@@ -122,40 +137,17 @@ def mksubs(facts, word_times):
         '',
         '[V4+ Styles]',
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        # PrimaryColour = Yellow (after spoken = highlighted)
-        # SecondaryColour = White (before spoken = not yet said)
-        'Style: Fact,Arial,58,&H0000FFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,2,2,40,40,200,1',
+        'Style: Fact,Arial,52,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,180,1',
         '',
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
     ]
-    
-    wi = 0
-    for i, fact in enumerate(facts):
-        words = [w for w in fact.split() if w.strip()]
-        n = len(words)
-        if n == 0:
+    for i, f in enumerate(facts):
+        if i < len(fact_timings):
+            start, end = fact_timings[i]
+        else:
             continue
-        # agar word_times khatam ho gaye
-        if wi + n > len(word_times):
-            break
-        
-        start = word_times[wi]['offset']
-        last = word_times[wi + n - 1]
-        end = last['offset'] + last['duration'] + 0.25  # chhota tail
-        
-        # Karaoke tags — har word ke aage \k<duration_in_centiseconds>
-        parts = []
-        for j, w in enumerate(words):
-            dur_cs = int(word_times[wi + j]['duration'] * 100)
-            if dur_cs < 1:
-                dur_cs = 1
-            parts.append('{\\k' + str(dur_cs) + '}' + w)
-        
-        ktext = ' '.join(parts)
-        L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + ktext)
-        wi += n
-    
+        L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + wrap(f.upper()))
     return '\n'.join(L)
 
 def sb(fid,ti,de,tg):
@@ -187,10 +179,10 @@ p+='1. Each fact MUST connect to the previous one\n'
 p+='2. Fact 2 should build on Fact 1, Fact 3 on Fact 2, etc.\n'
 p+='3. They should feel like chapters of a single story\n'
 p+='4. NO random unrelated facts\n'
-p+='5. Each fact: 12-18 words maximum\n'
+p+='5. Each fact: 8-12 words maximum\n'
 p+='6. Shocking, interesting, viral-worthy\n\n'
 p+='Example flow (space):\n'
-p+='"Space is completely silent" -> "But astronauts can hear their heartbeat" -> "That heartbeat can reach 150 BPM" -> "So astronauts train 200+ hours underwater" -> "That training is called the pool of fear"\n\n'
+p+='"Space is completely silent" -> "But astronauts hear their heartbeat" -> "That heartbeat can reach 150 BPM" -> "So astronauts train underwater for hours" -> "That training is called the pool of fear"\n\n'
 p+='Return JSON: {"facts":["fact1","fact2",...]}'
 r=gq(p,1200,0.85,True)
 facts=[]
@@ -215,6 +207,34 @@ if not os.path.exists(vp) or os.path.getsize(vp) < 1000:
 atd=probe(vp)
 print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
 
+# ============ Map words to facts (accurate timing) ============
+fact_timings = []
+if word_times:
+    wi = 0
+    for i, fact in enumerate(facts):
+        fw = [w for w in fact.split() if w.strip()]
+        n = len(fw)
+        if n == 0:
+            continue
+        if wi + n <= len(word_times):
+            start = word_times[wi]['offset']
+            last = word_times[wi + n - 1]
+            end = last['offset'] + last['duration']
+        elif wi < len(word_times):
+            start = word_times[wi]['offset']
+            end = atd
+        else:
+            start = atd
+            end = start + 1
+        fact_timings.append((start, end))
+        wi += n
+else:
+    pt = atd / max(len(facts), 1)
+    fact_timings = [(i * pt, (i + 1) * pt) for i in range(len(facts))]
+
+for i, t in enumerate(fact_timings):
+    print('Fact ' + str(i+1) + ' timing: ' + str(round(t[0], 2)) + 's - ' + str(round(t[1], 2)) + 's')
+
 print('STEP 3: Download stock videos')
 urls=get_vids(kw,NF)
 print('Got '+str(len(urls))+' videos')
@@ -235,12 +255,12 @@ print('Clips: '+str(len(clips)))
 if len(clips)<2:
     print('Not enough clips');exit(1)
 
-print('STEP 5: Concat + karaoke captions')
+print('STEP 5: Concat + captions')
 open('l.txt','w').write('\n'.join("file '"+os.path.abspath(c)+"'" for c in clips))
 subprocess.run(['ffmpeg','-y','-f','concat','-safe','0','-i','l.txt','-c','copy','raw.mp4'],capture_output=True)
 
 ap='s.ass'
-open(ap,'w',encoding='utf-8').write(mksubs(facts, word_times))
+open(ap,'w',encoding='utf-8').write(mksubs(facts, fact_timings))
 
 op='facts_short.mp4'
 subprocess.run(['ffmpeg','-y','-i','raw.mp4','-i',vp,'-filter_complex','[0:v]ass='+ap+'[v];[1:a]volume=1.0[a]','-map','[v]','-map','[a]','-shortest','-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',op],capture_output=True)
