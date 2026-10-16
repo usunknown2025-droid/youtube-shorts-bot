@@ -20,6 +20,14 @@ CAT_KW={
 'funny':'funny cats dogs comedy cute animals'
 }
 
+SUBTOPICS={
+'space':['black holes','mars missions','the sun','galaxies','exoplanets','space travel','asteroids','jupiter','saturn','venus','the moon','space stations','nebulae','cosmic rays','big bang','dark matter','milky way','voyager probes','comets','solar system'],
+'history':['ancient egypt','roman empire','mongol empire','renaissance','bronze age','vikings','medieval europe','silk road','ancient greece','maya civilization','aztec empire','inca empire','persian empire','ottoman empire','industrial revolution','world war one','world war two','cold war','age of exploration','ancient china'],
+'animals':['ocean creatures','big cats','arctic wildlife','rainforest animals','birds of prey','reptiles','insects','deep sea creatures','african safari','amazon jungle','australian wildlife','endangered species','prehistoric animals','polar bears','whales','sharks','elephants','primates','wild canines','desert animals'],
+'science':['quantum physics','dna','black holes','chemistry','brain science','evolution','cells','physics laws','space science','medicine','vaccines','renewable energy','artificial intelligence','robots','nanotechnology','biotechnology','climate science','oceanography','geology','meteorology'],
+'funny':['funny cats','funny dogs','silly animals','funny babies','awkward moments','animal bloopers','funny sounds','unexpected humor','comedy wildlife','fails compilation','funny sports','funny food','pet antics','animal reactions','pranks gone wrong','funny accidents','comedy skits','stand up comedy','funny pranks','silly jokes']
+}
+
 def gq(p,mt=1500,t=0.85,jm=False):
     u='https://api.groq.com/openai/v1/chat/completions'
     h={'Authorization':'Bearer '+GK,'Content-Type':'application/json'}
@@ -122,7 +130,7 @@ def atime(s):
         s = 0
     return str(int(s // 3600)) + ':' + str(int((s % 3600) // 60)).zfill(2) + ':' + ('%05.2f' % (s % 60))
 
-def get_used_facts(topic, limit=200):
+def get_used_facts(topic, limit=500):
     if not SU or not SK:
         return []
     try:
@@ -154,6 +162,36 @@ def save_used_facts(topic, facts):
         print('Saved ' + str(len(rows)) + ' facts to history')
     except Exception as e:
         print('Save used facts error: ' + str(e))
+
+def get_used_subtopics(topic, limit=200):
+    if not SU or not SK:
+        return []
+    try:
+        r = requests.get(
+            SU + '/rest/v1/used_subtopics',
+            headers={'apikey': SK, 'Authorization': 'Bearer ' + SK},
+            params={'topic': 'eq.' + topic, 'select': 'subtopic', 'order': 'created_at.desc', 'limit': str(limit)},
+            timeout=30
+        ).json()
+        if isinstance(r, list):
+            return [item.get('subtopic', '') for item in r if item.get('subtopic')]
+    except Exception as e:
+        print('Used subtopics fetch error: ' + str(e))
+    return []
+
+def save_used_subtopic(topic, subtopic):
+    if not SU or not SK:
+        return
+    try:
+        requests.post(
+            SU + '/rest/v1/used_subtopics',
+            headers={'apikey': SK, 'Authorization': 'Bearer ' + SK, 'Content-Type': 'application/json'},
+            json=[{'topic': topic, 'subtopic': subtopic}],
+            timeout=30
+        )
+        print('Saved subtopic: ' + subtopic)
+    except Exception as e:
+        print('Save subtopic error: ' + str(e))
 
 def mksubs(facts, word_times, fact_timings):
     L = [
@@ -216,35 +254,45 @@ print('Category: '+CAT+' Facts: '+str(NF))
 
 if CUSTOM_CAT:
     topic_name=CUSTOM_CAT
-    kw=CUSTOM_CAT+' nature mystery'
+    subtopic=topic_name
+    kw=topic_name+' nature mystery'
 else:
     topic_name=CAT
-    kw=CAT_KW.get(CAT,'nature universe')
+    used_subtopics=get_used_subtopics(topic_name,200)
+    print('Used subtopics: '+str(len(used_subtopics)))
+    all_sub=SUBTOPICS.get(CAT,[])
+    available=[s for s in all_sub if s.lower() not in [u.lower() for u in used_subtopics]]
+    if not available:
+        print('All subtopics used! Resetting cycle...')
+        available=all_sub
+    subtopic=random.choice(available)
+    save_used_subtopic(topic_name,subtopic)
+    kw=subtopic+' '+CAT_KW.get(CAT,'nature universe')
 
 print('Topic: '+topic_name)
+print('Subtopic: '+subtopic)
 
 print('Fetching previously used facts...')
-used_facts = get_used_facts(topic_name, 200)
+used_facts = get_used_facts(topic_name, 500)
 print('Already used: ' + str(len(used_facts)) + ' facts')
 
 print('STEP 1: Generate connected facts')
 seed = random.randint(10000, 99999)
-p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + topic_name + '" that flow like a mini-story.\n\n'
-p += 'Random seed for variety: ' + str(seed) + '\n\n'
+p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + subtopic + '" (part of ' + topic_name + ' category) that flow like a mini-story.\n\n'
+p += 'Random seed: ' + str(seed) + '\n\n'
 p += 'CRITICAL RULES:\n'
 p += '1. Each fact MUST connect to the previous one\n'
 p += '2. Fact 2 should build on Fact 1, Fact 3 on Fact 2, etc.\n'
 p += '3. They should feel like chapters of a single story\n'
 p += '4. NO random unrelated facts\n'
 p += '5. Each fact: 6-9 words maximum (SHORT!)\n'
-p += '6. Shocking, interesting, viral-worthy\n\n'
+p += '6. Shocking, interesting, viral-worthy\n'
+p += '7. Focus ONLY on "' + subtopic + '" — do NOT wander into other ' + topic_name + ' topics\n\n'
 if used_facts:
     p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
-    for u in used_facts[:80]:
+    for u in used_facts[:100]:
         p += '- ' + u + '\n'
-    p += '\nGenerate COMPLETELY NEW and UNIQUE facts that have NOT been covered before.\n\n'
-p += 'Example flow (space):\n'
-p += '"Space is completely silent" -> "But astronauts hear their heartbeat" -> "It can reach 150 BPM" -> "So they train underwater" -> "That pool is called fear"\n\n'
+    p += '\nGenerate COMPLETELY NEW and UNIQUE facts.\n\n'
 p += 'Return JSON: {"facts":["fact1","fact2",...]}'
 r=gq(p,1200,0.95,True)
 facts=[]
@@ -252,30 +300,27 @@ if r:
     d=pj(r)
     if d:facts=d.get('facts',[])
 if facts and used_facts:
-    used_lower = [u.lower().strip() for u in used_facts]
-    fresh = []
-    for f in facts:
-        fl = f.lower().strip()
-        if fl in used_lower:
-            print('SKIPPED (duplicate): ' + f)
-            continue
-        fresh.append(f)
-    if len(fresh) < NF:
-        print('Only ' + str(len(fresh)) + ' fresh facts, regenerating...')
-        p2 = p + '\n\nYour previous output was mostly duplicates. Generate entirely different facts.'
-        r2 = gq(p2, 1200, 1.0, True)
+    used_lower=[u.lower().strip() for u in used_facts]
+    fresh=[f for f in facts if f.lower().strip() not in used_lower]
+    if len(fresh)<NF:
+        print('Regenerating (duplicates found)...')
+        p2=p+'\n\nYour previous output had duplicates. Generate entirely different facts.'
+        r2=gq(p2,1200,1.0,True)
         if r2:
-            d2 = pj(r2)
+            d2=pj(r2)
             if d2:
-                facts = d2.get('facts', [])
+                facts=d2.get('facts',[])
         else:
-            facts = fresh
+            facts=fresh
     else:
-        facts = fresh
+        facts=fresh
 if not facts:
-    facts=['Fact 1 about '+topic_name,'Fact 2 building on fact 1','Fact 3 continuing the story','Fact 4 adds detail','Fact 5 concludes']
+    facts=['Fact 1 about '+subtopic,'Fact 2 building on fact 1','Fact 3 continuing the story','Fact 4 adds detail','Fact 5 concludes']
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
+
+print('Saving facts to history EARLY')
+save_used_facts(topic_name, facts)
 
 print('STEP 2: Voiceover with word timing')
 vp='voice.mp3'
@@ -351,9 +396,6 @@ except:pass
 if not os.path.exists(op):
     print('Render failed');exit(1)
 print('Video: '+op)
-print('STEP 6: Save used facts to history')
-save_used_facts(topic_name, facts)
-
 print('STEP 7: Metadata')
 FACTS_TAGS = {
     'space': ['space facts', 'universe', 'galaxy', 'astronomy', 'cosmos', 'nasa', 'planets', 'stars', 'space exploration', 'science facts', 'did you know', 'educational', 'space science', 'cosmology', 'astrophysics'],
@@ -377,17 +419,17 @@ else:
     fallback_tags = FACTS_TAGS.get(CAT, FACTS_TAGS['space'])
     fallback_hashtags = FACTS_HASHTAGS.get(CAT, FACTS_HASHTAGS['space'])
 
-tp = 'Write YouTube Shorts metadata for a "' + topic_name + '" FACTS video.\n\n'
+tp = 'Write YouTube Shorts metadata for a "' + subtopic + '" FACTS video (category: ' + topic_name + ').\n\n'
 tp += 'CRITICAL RULES:\n'
-tp += '1. Title: max 60 chars, catchy but educational. End with 4 hashtags: #Shorts #Facts #[CategorySpecific] #DidYouKnow\n'
+tp += '1. Title: max 60 chars, catchy but educational. End with 4 hashtags: #Shorts #Facts #[SubtopicSpecific] #DidYouKnow\n'
 tp += '2. DO NOT use #MrBeast, #Viral, #Trending, #FYP\n'
 tp += '3. Description: 2-3 lines + blank line + 15 facts hashtags\n'
 tp += '4. Tags: 15 comma-separated SEO tags\n'
 tp += '5. NO tags like: mrbeast, viral, trending, fyp, shorts\n\n'
 tp += 'Return JSON: {"title":"...","description":"...","tags":["tag1","tag2",...]}'
 
-ti = topic_name.title() + ' Facts #Shorts #Facts #' + topic_name.replace(' ', '').title() + ' #DidYouKnow'
-de = 'Mind-blowing ' + topic_name + ' facts you never knew!\n\n' + ' '.join(fallback_hashtags)
+ti = subtopic.title() + ' Facts #Shorts #Facts #' + subtopic.replace(' ', '').title() + ' #DidYouKnow'
+de = 'Mind-blowing ' + subtopic + ' facts you never knew!\n\n' + ' '.join(fallback_hashtags)
 tgs = ', '.join(fallback_tags)
 
 r = gq(tp, 900, 0.5, True)
@@ -422,7 +464,7 @@ print('Title: ' + ti[:80])
 print('Tags: ' + tgs[:80])
 
 print('STEP 8: Send to Telegram')
-tg=subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendVideo','-F','chat_id='+CID,'-F','video=@'+op,'-F','caption='+topic_name.title()+' Facts - '+str(NF)+' facts'],capture_output=True,text=True)
+tg=subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendVideo','-F','chat_id='+CID,'-F','video=@'+op,'-F','caption='+subtopic.title()+' Facts - '+str(NF)+' facts'],capture_output=True,text=True)
 fid=None
 try:
     j=json.loads(tg.stdout)
@@ -434,9 +476,9 @@ if fid:
     print('Row: '+str(rid))
     if rid:
         kb=json.dumps({'inline_keyboard':[[{'text':'✅ Upload','callback_data':'approve_'+str(rid)},{'text':'📅 Schedule','callback_data':'schedule_'+str(rid)}],[{'text':'✏️ Custom','callback_data':'custom_'+str(rid)},{'text':'❌ Skip','callback_data':'skip_'+str(rid)}]]})
-        txt='📝 *'+topic_name.title()+' Facts*\n\n📄 Title: '+ti+'\n\n📝 Desc: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
+        txt='📝 *'+subtopic.title()+' Facts*\n\n📄 Title: '+ti+'\n\n📝 Desc: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
         subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+txt,'-d','parse_mode=Markdown','-d','reply_markup='+kb],capture_output=True,text=True)
-        pt='🎨 CHATGPT THUMBNAIL PROMPT\n\nCopy this and paste in ChatGPT:\n\nYou are a YouTube Shorts thumbnail designer for a FACTS channel. Generate 6 thumbnails for:\n\nVIDEO TOPIC: '+re.sub(r'#\w+','',ti).strip()+'\n\nRULES:\n1. NO human faces — use only subject imagery, objects, animals, historical figures, nature, or 3D renders relevant to the topic\n2. BIG BOLD YELLOW text with THICK BLACK OUTLINE\n3. Large EMOJI in corner (😱🤯😮💥🔥)\n4. RED CIRCLE or ARROW highlighting an interesting detail\n5. HIGH CONTRAST vibrant colors\n6. Ultra-detailed, cinematic, hyper-realistic\n7. Format: 9:16 vertical\n\nSTYLES: Subject+Text+Emoji, Action+Circle, Object+Arrow, Text-Heavy, Before/After, Zoom+Detail\n\nOutput all 6 images.'
+        pt='🎨 CHATGPT THUMBNAIL PROMPT\n\nCopy this and paste in ChatGPT:\n\nYou are a YouTube Shorts thumbnail designer for a FACTS channel. Generate 6 thumbnails for:\n\nVIDEO TOPIC: '+subtopic.title()+'\n\nRULES:\n1. NO human faces — use only subject imagery, objects, animals, historical figures, nature, or 3D renders relevant to the topic\n2. BIG BOLD YELLOW text with THICK BLACK OUTLINE\n3. Large EMOJI in corner (😱🤯😮💥🔥)\n4. RED CIRCLE or ARROW highlighting an interesting detail\n5. HIGH CONTRAST vibrant colors\n6. Ultra-detailed, cinematic, hyper-realistic\n7. Format: 9:16 vertical\n\nSTYLES: Subject+Text+Emoji, Action+Circle, Object+Arrow, Text-Heavy, Before/After, Zoom+Detail\n\nOutput all 6 images.'
         subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','--data-urlencode','chat_id='+CID,'--data-urlencode','text='+pt],capture_output=True,text=True)
 
 try:os.remove(vp);os.remove(op)
