@@ -83,33 +83,72 @@ def clip(inp,out,dur):
     r=subprocess.run(['ffmpeg','-y','-ss',str(st),'-t',str(dur),'-i',inp,'-vf',vf,'-c:v','libx264','-preset','fast','-crf','23','-an',out],capture_output=True)
     return r.returncode==0 and os.path.exists(out)
 
-def tts(text,path):
+# ============ NEW: TTS with word-level timing ============
+def tts_with_timing(text, path):
     async def g():
-        c=edge_tts.Communicate(text,VN)
-        await c.save(path)
+        c = edge_tts.Communicate(text, VN)
+        words = []
+        with open(path, 'wb') as f:
+            async for chunk in c.stream():
+                if chunk['type'] == 'audio':
+                    f.write(chunk['data'])
+                elif chunk['type'] == 'WordBoundary':
+                    words.append({
+                        'text': chunk['text'],
+                        'offset': chunk['offset'] / 10000000.0,
+                        'duration': chunk['duration'] / 10000000.0
+                    })
+        return words
     try:
-        asyncio.run(g())
-        return os.path.getsize(path)>1000
-    except:return False
+        return asyncio.run(g())
+    except Exception as e:
+        print('TTS error: ' + str(e))
+        return []
 
 def atime(s):
-    return str(int(s//3600))+':'+str(int((s%3600)//60)).zfill(2)+':'+('%05.2f'%(s%60))
+    if s < 0:
+        s = 0
+    return str(int(s // 3600)) + ':' + str(int((s % 3600) // 60)).zfill(2) + ':' + ('%05.2f' % (s % 60))
 
-def wrap(t,mc=18):
-    ws=t.split();ls=[];c=''
+def wrap(t, mc=20):
+    ws = t.split()
+    ls = []
+    c = ''
     for w in ws:
-        if len(c)+len(w)+1<=mc:c=(c+' '+w).strip()
+        if len(c) + len(w) + 1 <= mc:
+            c = (c + ' ' + w).strip()
         else:
-            if c:ls.append(c)
-            c=w
-    if c:ls.append(c)
-    return '\\N'.join(ls[-2:])
+            if c:
+                ls.append(c)
+            c = w
+    if c:
+        ls.append(c)
+    return '\\N'.join(ls)  # ← AB SAARI LINES DIKHENGI
 
-def mksubs(facts,atd):
-    L=['[Script Info]','ScriptType: v4.00+','PlayResX: 720','PlayResY: 1280','WrapStyle: 0','ScaledBorderAndShadow: yes','','[V4+ Styles]','Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding','Style: Fact,Arial,70,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,200,1','','[Events]','Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text']
-    pt=atd/len(facts)
-    for i,f in enumerate(facts):
-        L.append('Dialogue: 0,'+atime(i*pt)+','+atime((i+1)*pt)+',Fact,,0,0,0,,'+wrap(f.upper()))
+def mksubs(facts, fact_timings):
+    L = [
+        '[Script Info]',
+        'ScriptType: v4.00+',
+        'PlayResX: 720',
+        'PlayResY: 1280',
+        'WrapStyle: 0',
+        'ScaledBorderAndShadow: yes',
+        '',
+        '[V4+ Styles]',
+        'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+        'Style: Fact,Arial,68,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,2,40,40,180,1',
+        '',
+        '[Events]',
+        'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
+    ]
+    for i, f in enumerate(facts):
+        if i < len(fact_timings):
+            start, end = fact_timings[i]
+        else:
+            start, end = 0, 2
+        # thoda extend — text screen pe rehne ke liye
+        end = end + 0.15
+        L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + wrap(f.upper()))
     return '\n'.join(L)
 
 def sb(fid,ti,de,tg):
@@ -156,13 +195,46 @@ if not facts:
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
 
-print('STEP 2: Voiceover')
+print('STEP 2: Voiceover with timing')
 vp='voice.mp3'
 full='. '.join(facts)+'.'
-if not tts(full,vp):
+word_times = tts_with_timing(full, vp)
+
+if not os.path.exists(vp) or os.path.getsize(vp) < 1000:
+    print('TTS failed, fallback to silence')
     subprocess.run(['ffmpeg','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t',str(NF*4),'-q:a','9','-acodec','libmp3lame',vp])
+    word_times = []
+
 atd=probe(vp)
-print('Audio: '+str(round(atd,1))+'s')
+print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
+
+# ============ Map words to facts ============
+fact_timings = []
+if word_times:
+    wi = 0
+    for fact in facts:
+        fw = [w for w in fact.split() if w.strip()]
+        n = len(fw)
+        if wi + n <= len(word_times):
+            start = word_times[wi]['offset']
+            last = word_times[wi + n - 1]
+            end = last['offset'] + last['duration']
+        else:
+            # fallback: agar word count match nahi hua
+            if wi < len(word_times):
+                start = word_times[wi]['offset']
+            else:
+                start = 0
+            end = start + 2.0
+        fact_timings.append((start, end))
+        wi += n
+else:
+    # TTS fail — uniform distribution
+    pt = atd / max(len(facts), 1)
+    fact_timings = [(i * pt, (i + 1) * pt) for i in range(len(facts))]
+
+for i, t in enumerate(fact_timings):
+    print('Fact ' + str(i+1) + ' timing: ' + str(round(t[0], 2)) + 's - ' + str(round(t[1], 2)) + 's')
 
 print('STEP 3: Download stock videos')
 urls=get_vids(kw,NF)
@@ -189,7 +261,7 @@ open('l.txt','w').write('\n'.join("file '"+os.path.abspath(c)+"'" for c in clips
 subprocess.run(['ffmpeg','-y','-f','concat','-safe','0','-i','l.txt','-c','copy','raw.mp4'],capture_output=True)
 
 ap='s.ass'
-open(ap,'w',encoding='utf-8').write(mksubs(facts,atd))
+open(ap,'w',encoding='utf-8').write(mksubs(facts, fact_timings))
 
 op='facts_short.mp4'
 subprocess.run(['ffmpeg','-y','-i','raw.mp4','-i',vp,'-filter_complex','[0:v]ass='+ap+'[v];[1:a]volume=1.0[a]','-map','[v]','-map','[a]','-shortest','-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',op],capture_output=True)
@@ -206,7 +278,6 @@ print('Video: '+op)
 
 print('STEP 6: Metadata')
 
-# ============ FACTS-SPECIFIC HASHTAGS (NO MrBeast) ============
 FACTS_TAGS = {
     'space': ['space facts', 'universe', 'galaxy', 'astronomy', 'cosmos', 'nasa', 'planets', 'stars', 'space exploration', 'science facts', 'did you know', 'educational', 'space science', 'cosmology', 'astrophysics'],
     'animals': ['animal facts', 'wildlife', 'nature', 'animal kingdom', 'wild animals', 'nature facts', 'amazing animals', 'zoology', 'animal behavior', 'nature lovers', 'did you know', 'educational', 'wildlife facts', 'animals', 'wild nature'],
@@ -222,7 +293,6 @@ FACTS_HASHTAGS = {
     'funny': ['#Facts', '#FunFacts', '#AmazingFacts', '#DidYouKnow', '#WeirdFacts', '#Interesting', '#Education', '#Learning', '#Knowledge', '#Explore', '#Funny', '#Surprising', '#Unbelievable', '#FunFactsDaily', '#Wow'],
 }
 
-# Category-specific fallback
 if CUSTOM_CAT:
     cat_clean = CUSTOM_CAT.replace(' ', '')
     fallback_tags = ['facts', 'did you know', 'education', 'learning', 'knowledge', CUSTOM_CAT, CUSTOM_CAT + ' facts', 'amazing ' + CUSTOM_CAT, 'interesting ' + CUSTOM_CAT, 'top ' + CUSTOM_CAT, 'educational', 'discovery', 'nature facts', 'explore', 'amazing facts']
@@ -231,7 +301,6 @@ else:
     fallback_tags = FACTS_TAGS.get(CAT, FACTS_TAGS['space'])
     fallback_hashtags = FACTS_HASHTAGS.get(CAT, FACTS_HASHTAGS['space'])
 
-# Groq prompt — facts-specific
 tp = 'Write YouTube Shorts metadata for a "' + topic_name + '" FACTS video.\n\n'
 tp += 'CRITICAL RULES:\n'
 tp += '1. Title: max 60 chars, catchy but educational. End with 4 hashtags: #Shorts #Facts #[CategorySpecific] #DidYouKnow\n'
@@ -242,45 +311,33 @@ tp += '5. Tags: 15 comma-separated SEO tags for facts niche (e.g., "facts", "did
 tp += '6. NO tags like: mrbeast, viral, trending, fyp, shorts\n\n'
 tp += 'Return JSON: {"title":"...","description":"...","tags":["tag1","tag2",...]}'
 
-# Fallback title
 ti = topic_name.title() + ' Facts #Shorts #Facts #' + topic_name.replace(' ', '').title() + ' #DidYouKnow'
-
-# Fallback description
 de = 'Mind-blowing ' + topic_name + ' facts you never knew!\n\n' + ' '.join(fallback_hashtags)
-
-# Fallback tags
 tgs = ', '.join(fallback_tags)
 
-# Groq call
 r = gq(tp, 900, 0.5, True)
 if r:
     md = pj(r)
     if md:
-        # Title cleanup — remove Mr Beast hashtags
         ti = md.get('title', '') or ti
         for bad in ['#MrBeast', '#Viral', '#Trending', '#FYP', '#ViralVideo', '#TrendingNow', '#ViralClip', '#ShortsFeed']:
             ti = ti.replace(bad, '')
         ti = re.sub(r'\s+', ' ', ti).strip()
-        # Ensure facts hashtags
         for h in ['#Shorts', '#Facts', '#DidYouKnow']:
             if h.lower() not in ti.lower():
                 ti = ti.rstrip() + ' ' + h
 
-        # Description cleanup
         de = md.get('description', '') or de
         for bad in ['#MrBeast', '#Viral', '#Trending', '#FYP', '#ViralVideo', '#TrendingNow', '#ViralClip', '#ShortsFeed']:
             de = de.replace(bad, '')
-        # Ensure enough facts hashtags
         if len(re.findall(r'#\w+', de)) < 15:
             for b in fallback_hashtags:
                 if b.lower() not in de.lower() and len(re.findall(r'#\w+', de)) < 15:
                     de += ' ' + b
 
-        # Tags cleanup
         tgd = md.get('tags', []) or []
         bad_tags = ['mrbeast', 'viral', 'trending', 'fyp', 'viral video', 'shorts feed', 'shorts']
         tgd = [t for t in tgd if t.lower() not in bad_tags]
-        # Ensure 15 tags
         if len(tgd) < 15:
             for b in fallback_tags:
                 if b not in tgd and len(tgd) < 15:
