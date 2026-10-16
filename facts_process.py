@@ -194,8 +194,9 @@ def save_used_subtopic(topic, subtopic):
         print('Save subtopic error: ' + str(e))
 
 def mksubs(facts, word_times, fact_timings):
-    # POS_X = 360 (center), POS_Y = 1000 (bottom se 280px upar, screen 1280)
     POS = '{\\an5\\pos(360,1000)}'
+    WHITE = '{\\c&H00FFFFFF&}'
+    YELLOW = '{\\c&H0000FFFF&}'
     L = [
         '[Script Info]',
         'ScriptType: v4.00+',
@@ -206,7 +207,7 @@ def mksubs(facts, word_times, fact_timings):
         '',
         '[V4+ Styles]',
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Fact,DejaVu Sans,58,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,5,25,25,0,1',
+        'Style: Fact,DejaVu Sans,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,5,25,25,0,1',
         '',
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
@@ -232,17 +233,32 @@ def mksubs(facts, word_times, fact_timings):
         chunk = all_words[i:i+CHUNK]
         if i + len(chunk) - 1 >= len(word_times):
             break
-        start = word_times[i]['offset']
-        last = word_times[i + len(chunk) - 1]
-        end = last['offset'] + last['duration'] + 0.15
         if len(chunk) == 1:
-            text = chunk[0].upper()
+            mid = 1
         else:
             mid = (len(chunk) + 1) // 2
-            line1 = ' '.join(w.upper() for w in chunk[:mid])
-            line2 = ' '.join(w.upper() for w in chunk[mid:])
-            text = line1 + '\\N' + line2
-        L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + POS + text)
+        for j in range(len(chunk)):
+            wt = word_times[i + j]
+            start = wt['offset']
+            if j + 1 < len(chunk):
+                end = word_times[i + j + 1]['offset']
+            else:
+                end = wt['offset'] + wt['duration'] + 0.15
+            end = max(end, start + 0.1)
+            parts = []
+            for k, w in enumerate(chunk):
+                wu = w.upper()
+                if k == j:
+                    parts.append(YELLOW + wu + WHITE)
+                else:
+                    parts.append(WHITE + wu)
+            if len(chunk) == 1:
+                text = parts[0]
+            else:
+                line1 = ' '.join(parts[:mid])
+                line2 = ' '.join(parts[mid:])
+                text = line1 + '\\N' + line2
+            L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + POS + text)
     return '\n'.join(L)
 
 def sb(fid,ti,de,tg):
