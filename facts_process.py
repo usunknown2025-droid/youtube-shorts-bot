@@ -153,7 +153,7 @@ def mksubs(facts, word_times, fact_timings):
         '',
         '[V4+ Styles]',
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Fact,Arial,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,4,3,2,30,30,180,1',
+        'Style: Fact,Arial,95,&H0000FFFF,&H0000FFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,4,2,30,30,250,1',
         '',
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
@@ -166,34 +166,26 @@ def mksubs(facts, word_times, fact_timings):
                 s, e = 0, 2
             L.append('Dialogue: 0,' + atime(s) + ',' + atime(e) + ',Fact,,0,0,0,,' + f.upper())
         return '\n'.join(L)
-    wi = 0
-    for i, fact in enumerate(facts):
-        fact_words = [w for w in fact.split() if w.strip()]
-        n = len(fact_words)
-        if n == 0:
-            continue
-        if wi + n > len(word_times):
+    all_words = []
+    for fact in facts:
+        for w in fact.split():
+            if w.strip():
+                all_words.append(w)
+    CHUNK = 3
+    for i in range(0, len(all_words), CHUNK):
+        chunk = all_words[i:i+CHUNK]
+        if i + len(chunk) - 1 >= len(word_times):
             break
-        for j in range(n):
-            wtime = word_times[wi + j]
-            w_start = wtime['offset']
-            w_end = wtime['offset'] + wtime['duration']
-            if j + 1 < n:
-                next_start = word_times[wi + j + 1]['offset']
-                w_end = max(w_end, next_start - 0.02)
-            w_end = max(w_end, w_start + 0.15)
-            parts = []
-            for k, w in enumerate(fact_words):
-                wu = w.upper()
-                if k < j:
-                    parts.append('{\\c&HFFFFFF&\\alpha&H00&}' + wu)
-                elif k == j:
-                    parts.append('{\\c&H00FFFF&\\alpha&H00&}' + wu)
-                else:
-                    parts.append('{\\c&HFFFFFF&\\alpha&HFF&}' + wu)
-            full_text = ' '.join(parts)
-            L.append('Dialogue: 0,' + atime(w_start) + ',' + atime(w_end) + ',Fact,,0,0,0,,' + full_text)
-        wi += n
+        start = word_times[i]['offset']
+        last = word_times[i + len(chunk) - 1]
+        end = last['offset'] + last['duration'] + 0.05
+        text = ' '.join(w.upper() for w in chunk)
+        if len(text) > 22:
+            mid = (len(chunk) + 1) // 2
+            line1 = ' '.join(w.upper() for w in chunk[:mid])
+            line2 = ' '.join(w.upper() for w in chunk[mid:])
+            text = line1 + '\\N' + line2
+        L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + text)
     return '\n'.join(L)
 
 def sb(fid,ti,de,tg):
@@ -328,7 +320,7 @@ print('Clips: '+str(len(clips)))
 if len(clips)<2:
     print('Not enough clips');exit(1)
 
-print('STEP 5: Concat + karaoke captions')
+print('STEP 5: Concat + captions')
 open('l.txt','w').write('\n'.join("file '"+os.path.abspath(c)+"'" for c in clips))
 subprocess.run(['ffmpeg','-y','-f','concat','-safe','0','-i','l.txt','-c','copy','raw.mp4'],capture_output=True)
 ap='s.ass'
