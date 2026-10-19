@@ -85,7 +85,8 @@ def upload_to_youtube(video_path, title, description, tags):
         },
         'status': {
             'privacyStatus': 'public',
-            'selfDeclaredMadeForKids': False
+            'selfDeclaredMadeForKids': False,    # 👈 Baccho ke liye NAHI hai
+            'containsSyntheticMedia': False      # 👈 AI use NAHI hua hai
         }
     }
 
