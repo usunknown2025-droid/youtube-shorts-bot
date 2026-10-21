@@ -20,7 +20,7 @@ on:
         type: string
       voice_name:
         required: false
-        default: 'en-GB-RyanNeural'
+        default: 'hi-IN-SwaraNeural'
         type: string
 
 jobs:
@@ -31,7 +31,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg libass9
+      - name: Install ffmpeg and Hindi Fonts
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libass9 fonts-indic fonts-noto
       - run: pip install requests edge-tts
       - run: python3 facts_process.py
         env:
