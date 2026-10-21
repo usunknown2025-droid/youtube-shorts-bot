@@ -91,11 +91,12 @@ def clip(inp,out,dur):
     r=subprocess.run(['ffmpeg','-y','-ss',str(st),'-t',str(dur),'-i',inp,'-vf',vf,'-c:v','libx264','-preset','fast','-crf','23','-an',out],capture_output=True)
     return r.returncode==0 and os.path.exists(out)
 
+# Yahan humne audio generate karne ka tarika thoda badla hai taaki audio cut off na ho
 def tts_with_timing(text, path):
     async def g():
-        # Speed +12% kar di hai taaki fast aur energetic lage
-        c = edge_tts.Communicate(text, VN, rate="+12%")
+        c = edge_tts.Communicate(text, VN, rate="+10%")
         words = []
+        # Audio file ko write mode mein open karo
         with open(path, 'wb') as f:
             async for chunk in c.stream():
                 if chunk['type'] == 'audio':
@@ -198,7 +199,7 @@ def mksubs(facts, word_times, fact_timings):
     POS = '{\\an5\\pos(360,1000)}'
     WHITE = '{\\c&H00FFFFFF&}'
     YELLOW = '{\\c&H0000FFFF&}'
-    # Yahan font change karke 'Noto Sans Devanagari' kar diya hai
+    # Yahan Noto Sans Devanagari font use kiya hai taaki caption mein box na aaye
     L = [
         '[Script Info]',
         'ScriptType: v4.00+',
@@ -348,8 +349,11 @@ save_used_facts(topic_name, facts)
 
 print('STEP 2: Voiceover with word timing')
 vp='voice.mp3'
+# Audio cut off na ho isliye ek-ek karke join kar rahe hain
 full='. '.join(facts)+'.'
 word_times = tts_with_timing(full, vp)
+
+# Agar audio file 1000 bytes se choti hai matlab audio fail ho gaya
 if not os.path.exists(vp) or os.path.getsize(vp) < 1000:
     print('TTS failed, fallback to silence')
     subprocess.run(['ffmpeg','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t',str(NF*4),'-q:a','9','-acodec','libmp3lame',vp])
