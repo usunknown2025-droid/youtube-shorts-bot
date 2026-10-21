@@ -6,8 +6,12 @@ CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
 VN = 'hi-IN-SwaraNeural' 
 
-CAT=os.environ.get('CATEGORY','space')
-CUSTOM_CAT=os.environ.get('CUSTOM_CATEGORY','')
+# 🚨 FIX: Category aur Custom Category ko sahi se check karo
+CAT = os.environ.get('CATEGORY', 'space').lower().strip()
+CUSTOM_CAT = os.environ.get('CUSTOM_CATEGORY', '').strip()
+if CUSTOM_CAT.lower() in ['undefined', 'null']:
+    CUSTOM_CAT = ''
+
 NF=int(os.environ.get('NUM_FACTS','5'))
 PK=os.environ.get('PIXABAY_API_KEY','')
 SU=os.environ.get('SUPABASE_URL','').rstrip('/')
@@ -272,22 +276,25 @@ def sb(fid,ti,de,tg):
 print('FACTS GENERATOR (HINDI VERSION)')
 print('Category: '+CAT+' Facts: '+str(NF))
 
-if CUSTOM_CAT:
-    topic_name=CUSTOM_CAT
-    subtopic=topic_name
-    kw=topic_name+' nature mystery'
+# 🚨 FIX: Sirf tabhi custom use karo jab CAT 'custom' ho
+if CAT == 'custom' and CUSTOM_CAT:
+    topic_name = CUSTOM_CAT
+    subtopic = topic_name
+    kw = topic_name + ' nature mystery'
 else:
-    topic_name=CAT
-    used_subtopics=get_used_subtopics(topic_name,200)
+    if CAT not in CAT_KW:
+        CAT = 'space'
+    topic_name = CAT
+    used_subtopics = get_used_subtopics(topic_name, 200)
     print('Used subtopics: '+str(len(used_subtopics)))
-    all_sub=SUBTOPICS.get(CAT,[])
-    available=[s for s in all_sub if s.lower() not in [u.lower() for u in used_subtopics]]
+    all_sub = SUBTOPICS.get(CAT,[])
+    available = [s for s in all_sub if s.lower() not in [u.lower() for u in used_subtopics]]
     if not available:
         print('All subtopics used! Resetting cycle...')
-        available=all_sub
-    subtopic=random.choice(available)
-    save_used_subtopic(topic_name,subtopic)
-    kw=subtopic+' '+CAT_KW.get(CAT,'nature universe')
+        available = all_sub
+    subtopic = random.choice(available)
+    save_used_subtopic(topic_name, subtopic)
+    kw = subtopic + ' ' + CAT_KW.get(CAT,'nature universe')
 
 print('Topic: '+topic_name)
 print('Subtopic: '+subtopic)
@@ -361,7 +368,6 @@ for idx, fact in enumerate(facts):
             dur = 2.0
             fw = [] 
             
-        # 🚨 FIX: Agar AI timing nahi de raha (fw khali hai), to khud estimate karo taaki yellow highlight kaam kare
         if not fw:
             print(f'Fact {idx} no word boundary, estimating...')
             fw = estimate_word_times(fact, dur)
@@ -459,7 +465,7 @@ FACTS_HASHTAGS = {
     'funny': ['#FactsInHindi', '#FunnyFacts', '#Majedar', '#RochakTathya', '#DidYouKnow', '#Comedy', '#Entertainment', '#Knowledge', '#AmazingFacts', '#India'],
 }
 
-if CUSTOM_CAT:
+if CAT == 'custom' and CUSTOM_CAT:
     cat_clean = CUSTOM_CAT.replace(' ', '')
     fallback_tags = ['facts in hindi', 'rochak tathya', 'did you know', 'amazing facts', CUSTOM_CAT, CUSTOM_CAT + ' facts', 'hindi facts']
     fallback_hashtags = ['#FactsInHindi', '#RochakTathya', '#DidYouKnow', '#AmazingFacts', '#' + cat_clean, '#Knowledge', '#India']
