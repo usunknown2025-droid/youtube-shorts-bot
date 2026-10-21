@@ -4,7 +4,8 @@ import edge_tts
 GK=os.environ['GROQ_API_KEY']
 CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
-VN=os.environ.get('VOICE_NAME','hi-IN-MadhurNeural') # 👈 HINDI VOICE
+# Default voice ko Swara (Female) set kar diya hai, par n8n se override ho sakta hai
+VN=os.environ.get('VOICE_NAME','hi-IN-SwaraNeural')
 CAT=os.environ.get('CATEGORY','space')
 CUSTOM_CAT=os.environ.get('CUSTOM_CATEGORY','')
 NF=int(os.environ.get('NUM_FACTS','5'))
@@ -93,7 +94,8 @@ def clip(inp,out,dur):
 
 def tts_with_timing(text, path):
     async def g():
-        c = edge_tts.Communicate(text, VN)
+        # Yahan rate="-10%" add kiya hai taaki voice slow aur natural lage
+        c = edge_tts.Communicate(text, VN, rate="-10%")
         words = []
         with open(path, 'wb') as f:
             async for chunk in c.stream():
@@ -218,7 +220,7 @@ def mksubs(facts, word_times, fact_timings):
                 s, e = fact_timings[i]
             else:
                 s, e = 0, 2
-            words = f.upper().split() # Ab Hinglish hai, to upper() kaam karega
+            words = f.upper().split()
             mid = (len(words) + 1) // 2
             text = ' '.join(words[:mid]) + '\\N' + ' '.join(words[mid:])
             L.append('Dialogue: 0,' + atime(s) + ',' + atime(e) + ',Fact,,0,0,0,,' + POS + text)
@@ -228,7 +230,7 @@ def mksubs(facts, word_times, fact_timings):
         for w in fact.split():
             if w.strip():
                 all_words.append(w)
-    CHUNK = 4 # Hinglish words
+    CHUNK = 4
     for i in range(0, len(all_words), CHUNK):
         chunk = all_words[i:i+CHUNK]
         if i + len(chunk) - 1 >= len(word_times):
@@ -303,11 +305,12 @@ seed = random.randint(10000, 99999)
 p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + subtopic + '" that flow like a mini-story.\n\n'
 p += 'Random seed: ' + str(seed) + '\n\n'
 p += 'CRITICAL RULES:\n'
-p += '1. Write the script in a highly conversational, casual HINGLISH style (Hindi written in English alphabet).\n'
-p += '2. DO NOT use formal/bookish Hindi (like news anchors). Use English words naturally where a normal Indian YouTuber would (e.g., "Space mein sound nahi hota" instead of "Antariksh mein dhwani nahi hoti").\n'
-p += '3. Each fact MUST connect to the previous one (like a story).\n'
-p += '4. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
-p += '5. Focus ONLY on "' + subtopic + '"\n\n'
+p += '1. Write the script in a highly conversational HINGLISH style.\n'
+p += '2. Add natural human fillers at the start of some sentences (e.g., "Dekho...", "Socho zara...", "Kya aapko pata hai?", "Actually...").\n'
+p += '3. DO NOT use formal/bookish Hindi. Use natural Indian words.\n'
+p += '4. Each fact MUST connect to the previous one (like a story).\n'
+p += '5. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
+p += '6. Focus ONLY on "' + subtopic + '"\n\n'
 if used_facts:
     p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
     for u in used_facts[:100]:
