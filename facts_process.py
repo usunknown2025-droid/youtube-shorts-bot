@@ -4,8 +4,7 @@ import edge_tts
 GK=os.environ['GROQ_API_KEY']
 CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
-# Default voice ko Swara (Female) set kar diya hai, par n8n se override ho sakta hai
-VN=os.environ.get('VOICE_NAME','hi-IN-SwaraNeural')
+VN=os.environ.get('VOICE_NAME','hi-IN-SwaraNeural') # Female Voice
 CAT=os.environ.get('CATEGORY','space')
 CUSTOM_CAT=os.environ.get('CUSTOM_CATEGORY','')
 NF=int(os.environ.get('NUM_FACTS','5'))
@@ -94,8 +93,8 @@ def clip(inp,out,dur):
 
 def tts_with_timing(text, path):
     async def g():
-        # Yahan rate="-10%" add kiya hai taaki voice slow aur natural lage
-        c = edge_tts.Communicate(text, VN, rate="-10%")
+        # Speed badha di hai (+10%) taaki energetic lage
+        c = edge_tts.Communicate(text, VN, rate="+10%")
         words = []
         with open(path, 'wb') as f:
             async for chunk in c.stream():
@@ -306,11 +305,12 @@ p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + subtopic + '" that flow
 p += 'Random seed: ' + str(seed) + '\n\n'
 p += 'CRITICAL RULES:\n'
 p += '1. Write the script in a highly conversational HINGLISH style.\n'
-p += '2. Add natural human fillers at the start of some sentences (e.g., "Dekho...", "Socho zara...", "Kya aapko pata hai?", "Actually...").\n'
-p += '3. DO NOT use formal/bookish Hindi. Use natural Indian words.\n'
-p += '4. Each fact MUST connect to the previous one (like a story).\n'
-p += '5. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
-p += '6. Focus ONLY on "' + subtopic + '"\n\n'
+p += '2. Write from a FEMALE perspective (as if a girl is explaining to a friend). Avoid male-centric slang like "bhai" or "yaar".\n'
+p += '3. Add natural human fillers (e.g., "Dekho...", "Socho zara...", "Kya aapko pata hai?", "Actually...").\n'
+p += '4. DO NOT use formal/bookish Hindi. Use natural Indian words.\n'
+p += '5. Each fact MUST connect to the previous one (like a story).\n'
+p += '6. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
+p += '7. Focus ONLY on "' + subtopic + '"\n\n'
 if used_facts:
     p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
     for u in used_facts[:100]:
@@ -338,7 +338,7 @@ if facts and used_facts:
     else:
         facts=fresh
 if not facts:
-    facts=['Space mein sound nahi hota','Astronauts apni heartbeat sun sakte hain','Ye 150 BPM tak ja sakti hai','Isliye wo underwater train karte hain','Is training ko pool of fear kehte hain']
+    facts=['Dekho, Space mein sound nahi hota','Astronauts apni heartbeat sun sakte hain','Ye 150 BPM tak ja sakti hai','Isliye wo underwater train karte hain','Is training ko pool of fear kehte hain']
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
 
