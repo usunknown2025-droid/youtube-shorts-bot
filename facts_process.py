@@ -4,8 +4,6 @@ import edge_tts
 GK=os.environ['GROQ_API_KEY']
 CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
-
-# 🚨 VOICE FIX: Hardcoded Hindi Voice taaki English na bole
 VN = 'hi-IN-SwaraNeural' 
 
 CAT=os.environ.get('CATEGORY','space')
@@ -116,6 +114,19 @@ def generate_tts_retry(text, path, retries=3):
             print(f'TTS attempt {i+1} failed: {e}')
             time.sleep(2)
     return []
+
+def estimate_word_times(text, total_duration):
+    words = [w for w in text.split() if w.strip()]
+    if not words:
+        return []
+    total_weight = sum(len(w) + 1 for w in words)
+    times = []
+    t = 0.0
+    for w in words:
+        dur = ((len(w) + 1) / total_weight) * total_duration
+        times.append({'text': w, 'offset': t, 'duration': dur})
+        t += dur
+    return times
 
 def atime(s):
     if s < 0:
@@ -290,10 +301,10 @@ seed = random.randint(10000, 99999)
 p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + subtopic + '" that flow like a mini-story.\n\n'
 p += 'Random seed: ' + str(seed) + '\n\n'
 p += 'CRITICAL RULES:\n'
-p += '1. Write the script in natural, conversational HINDI (Devanagari script) exactly like a young Indian YouTuber.\n'
-p += '2. Use English loanwords but write them in Devanagari (e.g., "स्पेस", "एक्चुअली", "फैक्ट्स", "वीडियो").\n'
-p += '3. Write from a FEMALE perspective (as if a girl is explaining to a friend).\n'
-p += '4. Add natural human fillers (e.g., "देखो...", "सोचो ज़रा...", "क्या आपको पता है?").\n'
+p += '1. Start the very first fact with a hook: "क्या आपको पता है?" or "देखो...".\n'
+p += '2. Write in natural, conversational HINDI (Devanagari script) exactly like a young Indian YouTuber.\n'
+p += '3. DO NOT drop words like "है", "की", "का", "हैं". Write full sentences.\n'
+p += '4. Write from a FEMALE perspective.\n'
 p += '5. Each fact MUST connect to the previous one (like a story).\n'
 p += '6. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
 p += '7. Focus ONLY on "' + subtopic + '"\n\n'
@@ -324,7 +335,7 @@ if facts and used_facts:
     else:
         facts=fresh
 if not facts:
-    facts=['देखो, स्पेस में साउंड नहीं होता','एस्ट्रोनॉट्स अपनी धड़कन सुन सकते हैं','ये 150 BPM तक जा सकती है','इसलिए वो पानी के अंदर ट्रेनिंग करते हैं','इस ट्रेनिंग को पूल ऑफ फियर कहते हैं']
+    facts=['क्या आपको पता है? स्पेस में साउंड नहीं होता है','एस्ट्रोनॉट्स अपनी धड़कन सुन सकते हैं','ये 150 BPM तक जा सकती है','इसलिए वो पानी के अंदर ट्रेनिंग करते हैं','इस ट्रेनिंग को पूल ऑफ फियर कहते हैं']
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
 
@@ -348,6 +359,12 @@ for idx, fact in enumerate(facts):
             print(f'Fact {idx} audio too short, using 2s silence')
             subprocess.run(['ffmpeg','-y','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t','2','-q:a','9','-acodec','libmp3lame', fact_vp],capture_output=True)
             dur = 2.0
+            fw = [] 
+            
+        # 🚨 FIX: Agar AI timing nahi de raha (fw khali hai), to khud estimate karo taaki yellow highlight kaam kare
+        if not fw:
+            print(f'Fact {idx} no word boundary, estimating...')
+            fw = estimate_word_times(fact, dur)
             
         audio_files.append(fact_vp)
         start_t = current_time
@@ -416,7 +433,6 @@ ap='s.ass'
 open(ap,'w',encoding='utf-8').write(mksubs(facts, word_times, fact_timings))
 op='facts_short.mp4'
 
-# 🚨 FIX: '-shortest' hataya aur '-t' (audio duration) lagaya taaki video pura bane
 subprocess.run(['ffmpeg','-y','-i','raw.mp4','-i',vp,'-filter_complex','[0:v]ass='+ap+'[v];[1:a]volume=1.0[a]','-map','[v]','-map','[a]','-t',str(atd),'-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',op],capture_output=True)
 
 for c in clips:
