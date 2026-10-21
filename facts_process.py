@@ -97,7 +97,6 @@ def clip(inp,out,dur):
 
 def generate_tts_single(text, path, retries=3):
     async def g():
-        # SPEED BADHA KAR +18% KAR DI HAI
         c = edge_tts.Communicate(text, VN, rate="+18%")
         words = []
         with open(path, 'wb') as f:
@@ -219,14 +218,11 @@ def mksubs(word_times):
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
     ]
-    
-    # Ab hum directly word_times par loop karenge, fact boundaries par nahi
-    CHUNK = 3 # 3 words per chunk for TikTok style
+    CHUNK = 3 
     for i in range(0, len(word_times), CHUNK):
         chunk = word_times[i:i+CHUNK]
         if not chunk:
             continue
-            
         for j in range(len(chunk)):
             wt = chunk[j]
             start = wt['offset']
@@ -234,7 +230,6 @@ def mksubs(word_times):
                 end = chunk[j+1]['offset']
             else:
                 end = wt['offset'] + wt['duration'] + 0.1
-                
             end = max(end, start + 0.1)
             parts = []
             for k, w in enumerate(chunk):
@@ -243,16 +238,12 @@ def mksubs(word_times):
                     parts.append(YELLOW + wu + WHITE)
                 else:
                     parts.append(WHITE + wu)
-            
             text = ' '.join(parts)
-            
-            # Agar words bade hain to 2 lines mein split karo
             if len(text) > 22:
                 mid = (len(chunk) + 1) // 2
                 line1 = ' '.join(parts[:mid])
                 line2 = ' '.join(parts[mid:])
                 text = line1 + '\\N' + line2
-                
             L.append('Dialogue: 0,' + atime(start) + ',' + atime(end) + ',Fact,,0,0,0,,' + POS + text)
     return '\n'.join(L)
 
@@ -297,14 +288,15 @@ print('Already used: ' + str(len(used_facts)) + ' facts')
 
 print('STEP 1: Generate connected facts in Hindi')
 seed = random.randint(10000, 99999)
-p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + subtopic + '" that flow like a mini-story.\n\n'
+# 🚨 MAJOR PROMPT CHANGE: Viral TikTok/Reels style, No lecture.
+p = 'Generate ' + str(NF) + ' viral, standalone facts about "' + subtopic + '".\n\n'
 p += 'Random seed: ' + str(seed) + '\n\n'
 p += 'CRITICAL RULES:\n'
-p += '1. Write in natural, conversational HINDI (Devanagari script) exactly like a young Indian YouTuber.\n'
-p += '2. DO NOT drop words like "है", "की", "का", "हैं". Write full sentences.\n'
-p += '3. Write from a FEMALE perspective.\n'
-p += '4. Each fact MUST connect to the previous one (like a story).\n'
-p += '5. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
+p += '1. TONE: Extremely conversational, engaging, and mind-blowing (like a viral Indian YouTuber). Do NOT write a boring essay or lecture.\n'
+p += '2. FORMAT: Each fact should be a standalone shocker. Give a short hook then the explanation. (e.g., "Octopus ke 3 hearts hote hain! Is samundari jeev ke paas ek nahi, teen hearts hain!")\n'
+p += '3. LANGUAGE: Natural HINDI (Devanagari script) with common English words (like "space", "planet", "brain", "process" written in Devanagari).\n'
+p += '4. PERSPECTIVE: Female perspective (as if a girl is explaining to a friend).\n'
+p += '5. LENGTH: Keep each fact between 10-15 words. (PUNCHY AND SHORT).\n'
 p += '6. Focus ONLY on "' + subtopic + '"\n\n'
 if used_facts:
     p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
@@ -349,7 +341,6 @@ save_used_facts(topic_name, facts)
 
 print('STEP 2: Voiceover with word timing (Single Audio)')
 vp='voice.mp3'
-# Generate audio for the entire script at once to prevent gaps
 full_script = " ".join(facts)
 word_times = generate_tts_single(full_script, vp)
 atd = probe(vp)
@@ -359,7 +350,6 @@ if atd < 0.5:
     subprocess.run(['ffmpeg','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t',str(NF*4),'-q:a','9','-acodec','libmp3lame',vp])
     atd = NF * 4
 
-# Agar AI timing fail ho jaye, to hum khud estimate karenge pure script ka
 if not word_times:
     print('Word boundaries missing, estimating for full script...')
     word_times = estimate_word_times(full_script, atd)
