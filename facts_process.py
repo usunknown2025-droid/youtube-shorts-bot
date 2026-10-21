@@ -4,7 +4,7 @@ import edge_tts
 GK=os.environ['GROQ_API_KEY']
 CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
-VN=os.environ.get('VOICE_NAME','en-GB-RyanNeural')
+VN=os.environ.get('VOICE_NAME','hi-IN-MadhurNeural') # 👈 HINDI VOICE
 CAT=os.environ.get('CATEGORY','space')
 CUSTOM_CAT=os.environ.get('CUSTOM_CATEGORY','')
 NF=int(os.environ.get('NUM_FACTS','5'))
@@ -218,7 +218,7 @@ def mksubs(facts, word_times, fact_timings):
                 s, e = fact_timings[i]
             else:
                 s, e = 0, 2
-            words = f.upper().split()
+            words = f.upper().split() # Ab Hinglish hai, to upper() kaam karega
             mid = (len(words) + 1) // 2
             text = ' '.join(words[:mid]) + '\\N' + ' '.join(words[mid:])
             L.append('Dialogue: 0,' + atime(s) + ',' + atime(e) + ',Fact,,0,0,0,,' + POS + text)
@@ -228,7 +228,7 @@ def mksubs(facts, word_times, fact_timings):
         for w in fact.split():
             if w.strip():
                 all_words.append(w)
-    CHUNK = 5
+    CHUNK = 4 # Hinglish words
     for i in range(0, len(all_words), CHUNK):
         chunk = all_words[i:i+CHUNK]
         if i + len(chunk) - 1 >= len(word_times):
@@ -271,7 +271,7 @@ def sb(fid,ti,de,tg):
     except:pass
     return None
 
-print('FACTS GENERATOR (Connected)')
+print('FACTS GENERATOR (HINGLISH VERSION)')
 print('Category: '+CAT+' Facts: '+str(NF))
 
 if CUSTOM_CAT:
@@ -298,24 +298,22 @@ print('Fetching previously used facts...')
 used_facts = get_used_facts(topic_name, 500)
 print('Already used: ' + str(len(used_facts)) + ' facts')
 
-print('STEP 1: Generate connected facts')
+print('STEP 1: Generate connected facts in HINGLISH')
 seed = random.randint(10000, 99999)
-p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + subtopic + '" (part of ' + topic_name + ' category) that flow like a mini-story.\n\n'
+p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + subtopic + '" that flow like a mini-story.\n\n'
 p += 'Random seed: ' + str(seed) + '\n\n'
 p += 'CRITICAL RULES:\n'
-p += '1. Each fact MUST connect to the previous one\n'
-p += '2. Fact 2 should build on Fact 1, Fact 3 on Fact 2, etc.\n'
-p += '3. They should feel like chapters of a single story\n'
-p += '4. NO random unrelated facts\n'
-p += '5. Each fact: 6-9 words maximum (SHORT!)\n'
-p += '6. Shocking, interesting, viral-worthy\n'
-p += '7. Focus ONLY on "' + subtopic + '" — do NOT wander into other ' + topic_name + ' topics\n\n'
+p += '1. Write the script in a highly conversational, casual HINGLISH style (Hindi written in English alphabet).\n'
+p += '2. DO NOT use formal/bookish Hindi (like news anchors). Use English words naturally where a normal Indian YouTuber would (e.g., "Space mein sound nahi hota" instead of "Antariksh mein dhwani nahi hoti").\n'
+p += '3. Each fact MUST connect to the previous one (like a story).\n'
+p += '4. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
+p += '5. Focus ONLY on "' + subtopic + '"\n\n'
 if used_facts:
     p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
     for u in used_facts[:100]:
         p += '- ' + u + '\n'
     p += '\nGenerate COMPLETELY NEW and UNIQUE facts.\n\n'
-p += 'Return JSON: {"facts":["fact1","fact2",...]}'
+p += 'Return JSON: {"facts":["hinglish_fact_1","hinglish_fact_2",...]}'
 r=gq(p,1200,0.95,True)
 facts=[]
 if r:
@@ -337,7 +335,7 @@ if facts and used_facts:
     else:
         facts=fresh
 if not facts:
-    facts=['Fact 1 about '+subtopic,'Fact 2 building on fact 1','Fact 3 continuing the story','Fact 4 adds detail','Fact 5 concludes']
+    facts=['Space mein sound nahi hota','Astronauts apni heartbeat sun sakte hain','Ye 150 BPM tak ja sakti hai','Isliye wo underwater train karte hain','Is training ko pool of fear kehte hain']
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
 
@@ -418,92 +416,3 @@ except:pass
 if not os.path.exists(op):
     print('Render failed');exit(1)
 print('Video: '+op)
-print('STEP 7: Metadata')
-FACTS_TAGS = {
-    'space': ['space facts', 'universe', 'galaxy', 'astronomy', 'cosmos', 'nasa', 'planets', 'stars', 'space exploration', 'science facts', 'did you know', 'educational', 'space science', 'cosmology', 'astrophysics'],
-    'animals': ['animal facts', 'wildlife', 'nature', 'animal kingdom', 'wild animals', 'nature facts', 'amazing animals', 'zoology', 'animal behavior', 'nature lovers', 'did you know', 'educational', 'wildlife facts', 'animals', 'wild nature'],
-    'history': ['history facts', 'historical', 'ancient', 'history', 'did you know', 'past', 'civilization', 'historical facts', 'ancient history', 'world history', 'educational', 'history channel', 'ancient civilization', 'historical events', 'history lover'],
-    'science': ['science facts', 'scientific', 'physics', 'chemistry', 'biology', 'science', 'experiment', 'discovery', 'science education', 'stem', 'did you know', 'educational', 'science geeks', 'science lover', 'amazing science'],
-    'funny': ['funny facts', 'amazing facts', 'weird facts', 'fun facts', 'hilarious', 'comedy', 'entertaining', 'surprising facts', 'unbelievable', 'interesting facts', 'did you know', 'educational', 'fun trivia', 'random facts', 'wow facts'],
-}
-FACTS_HASHTAGS = {
-    'space': ['#Facts', '#Space', '#Universe', '#Astronomy', '#Cosmos', '#NASA', '#Galaxy', '#DidYouKnow', '#Education', '#Learning', '#Science', '#Knowledge', '#Explore', '#SpaceFacts', '#Amazing'],
-    'animals': ['#Facts', '#Animals', '#Wildlife', '#Nature', '#AnimalKingdom', '#DidYouKnow', '#Education', '#Learning', '#AmazingAnimals', '#NatureFacts', '#Knowledge', '#Explore', '#WildAnimals', '#Zoology', '#Interesting'],
-    'history': ['#Facts', '#History', '#Ancient', '#DidYouKnow', '#Education', '#Learning', '#Knowledge', '#Historical', '#Civilization', '#WorldHistory', '#Past', '#Explore', '#AncientHistory', '#HistoryFacts', '#Interesting'],
-    'science': ['#Facts', '#Science', '#Physics', '#Chemistry', '#Biology', '#DidYouKnow', '#Education', '#Learning', '#Knowledge', '#STEM', '#Discovery', '#Explore', '#ScienceFacts', '#Scientific', '#Amazing'],
-    'funny': ['#Facts', '#FunFacts', '#AmazingFacts', '#DidYouKnow', '#WeirdFacts', '#Interesting', '#Education', '#Learning', '#Knowledge', '#Explore', '#Funny', '#Surprising', '#Unbelievable', '#FunFactsDaily', '#Wow'],
-}
-if CUSTOM_CAT:
-    cat_clean = CUSTOM_CAT.replace(' ', '')
-    fallback_tags = ['facts', 'did you know', 'education', 'learning', 'knowledge', CUSTOM_CAT, CUSTOM_CAT + ' facts', 'amazing ' + CUSTOM_CAT, 'interesting ' + CUSTOM_CAT, 'top ' + CUSTOM_CAT, 'educational', 'discovery', 'nature facts', 'explore', 'amazing facts']
-    fallback_hashtags = ['#Facts', '#DidYouKnow', '#Education', '#Learning', '#Knowledge', '#Amazing', '#Explore', '#Interesting', '#TopFacts', '#' + cat_clean, '#' + cat_clean + 'Facts', '#Discovery', '#Nature', '#Wildlife', '#MustWatch']
-else:
-    fallback_tags = FACTS_TAGS.get(CAT, FACTS_TAGS['space'])
-    fallback_hashtags = FACTS_HASHTAGS.get(CAT, FACTS_HASHTAGS['space'])
-
-tp = 'Write YouTube Shorts metadata for a "' + subtopic + '" FACTS video (category: ' + topic_name + ').\n\n'
-tp += 'CRITICAL RULES:\n'
-tp += '1. Title: max 60 chars, catchy but educational. End with 4 hashtags: #Shorts #Facts #[SubtopicSpecific] #DidYouKnow\n'
-tp += '2. DO NOT use #MrBeast, #Viral, #Trending, #FYP\n'
-tp += '3. Description: 2-3 lines + blank line + 15 facts hashtags\n'
-tp += '4. Tags: 15 comma-separated SEO tags\n'
-tp += '5. NO tags like: mrbeast, viral, trending, fyp, shorts\n\n'
-tp += 'Return JSON: {"title":"...","description":"...","tags":["tag1","tag2",...]}'
-
-ti = subtopic.title() + ' Facts #Shorts #Facts #' + subtopic.replace(' ', '').title() + ' #DidYouKnow'
-de = 'Mind-blowing ' + subtopic + ' facts you never knew!\n\n' + ' '.join(fallback_hashtags)
-tgs = ', '.join(fallback_tags)
-
-r = gq(tp, 900, 0.5, True)
-if r:
-    md = pj(r)
-    if md:
-        ti = md.get('title', '') or ti
-        for bad in ['#MrBeast', '#Viral', '#Trending', '#FYP', '#ViralVideo', '#TrendingNow', '#ViralClip', '#ShortsFeed']:
-            ti = ti.replace(bad, '')
-        ti = re.sub(r'\s+', ' ', ti).strip()
-        for h in ['#Shorts', '#Facts', '#DidYouKnow']:
-            if h.lower() not in ti.lower():
-                ti = ti.rstrip() + ' ' + h
-        de = md.get('description', '') or de
-        for bad in ['#MrBeast', '#Viral', '#Trending', '#FYP', '#ViralVideo', '#TrendingNow', '#ViralClip', '#ShortsFeed']:
-            de = de.replace(bad, '')
-        if len(re.findall(r'#\w+', de)) < 15:
-            for b in fallback_hashtags:
-                if b.lower() not in de.lower() and len(re.findall(r'#\w+', de)) < 15:
-                    de += ' ' + b
-        tgd = md.get('tags', []) or []
-        bad_tags = ['mrbeast', 'viral', 'trending', 'fyp', 'viral video', 'shorts feed', 'shorts']
-        tgd = [t for t in tgd if t.lower() not in bad_tags]
-        if len(tgd) < 15:
-            for b in fallback_tags:
-                if b not in tgd and len(tgd) < 15:
-                    tgd.append(b)
-        if tgd:
-            tgs = ', '.join(tgd)
-
-print('Title: ' + ti[:80])
-print('Tags: ' + tgs[:80])
-
-print('STEP 8: Send to Telegram')
-tg=subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendVideo','-F','chat_id='+CID,'-F','video=@'+op,'-F','caption='+subtopic.title()+' Facts - '+str(NF)+' facts'],capture_output=True,text=True)
-fid=None
-try:
-    j=json.loads(tg.stdout)
-    if j.get('ok'):fid=j['result']['video']['file_id']
-except:pass
-
-if fid:
-    rid=sb(fid,ti,de,tgs)
-    print('Row: '+str(rid))
-    if rid:
-        kb=json.dumps({'inline_keyboard':[[{'text':'✅ Upload','callback_data':'approve_'+str(rid)},{'text':'📅 Schedule','callback_data':'schedule_'+str(rid)}],[{'text':'✏️ Custom','callback_data':'custom_'+str(rid)},{'text':'❌ Skip','callback_data':'skip_'+str(rid)}]]})
-        txt='📝 *'+subtopic.title()+' Facts*\n\n📄 Title: '+ti+'\n\n📝 Desc: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
-        subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+txt,'-d','parse_mode=Markdown','-d','reply_markup='+kb],capture_output=True,text=True)
-        pt='🎨 CHATGPT THUMBNAIL PROMPT\n\nCopy this and paste in ChatGPT:\n\nYou are a YouTube Shorts thumbnail designer for a FACTS channel. Generate 6 thumbnails for:\n\nVIDEO TOPIC: '+subtopic.title()+'\n\nRULES:\n1. NO human faces — use only subject imagery, objects, animals, historical figures, nature, or 3D renders relevant to the topic\n2. BIG BOLD YELLOW text with THICK BLACK OUTLINE\n3. Large EMOJI in corner (😱🤯😮💥🔥)\n4. RED CIRCLE or ARROW highlighting an interesting detail\n5. HIGH CONTRAST vibrant colors\n6. Ultra-detailed, cinematic, hyper-realistic\n7. Format: 9:16 vertical\n\nSTYLES: Subject+Text+Emoji, Action+Circle, Object+Arrow, Text-Heavy, Before/After, Zoom+Detail\n\nOutput all 6 images.'
-        subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','--data-urlencode','chat_id='+CID,'--data-urlencode','text='+pt],capture_output=True,text=True)
-
-try:os.remove(vp);os.remove(op)
-except:pass
-
-print('All Done!')
