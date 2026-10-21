@@ -416,3 +416,92 @@ except:pass
 if not os.path.exists(op):
     print('Render failed');exit(1)
 print('Video: '+op)
+print('STEP 7: Metadata')
+FACTS_TAGS = {
+    'space': ['antariksh', 'space facts hindi', 'brahmand', 'solar system hindi', 'nasa hindi', 'rochak tathya', 'vigyan', 'science facts hindi'],
+    'animals': ['janwar', 'animal facts hindi', 'wildlife hindi', 'rochak tathya', 'jungle', 'amazing animals', 'nature facts hindi'],
+    'history': ['itihas', 'history facts hindi', 'purana itihas', 'rochak tathya', 'historical facts', 'ancient history hindi'],
+    'science': ['vigyan', 'science facts hindi', 'physics', 'chemistry', 'biology', 'rochak tathya', 'invention', 'discovery'],
+    'funny': ['majedar', 'funny facts hindi', 'majedar tathya', 'comedy', 'entertainment', 'rochak tathya', 'interesting facts'],
+}
+FACTS_HASHTAGS = {
+    'space': ['#FactsInHindi', '#SpaceFacts', '#Antariksh', '#RochakTathya', '#ScienceInHindi', '#DidYouKnow', '#Vigyan', '#Knowledge', '#AmazingFacts', '#India'],
+    'animals': ['#FactsInHindi', '#AnimalFacts', '#Janwar', '#RochakTathya', '#Wildlife', '#DidYouKnow', '#NatureFacts', '#Knowledge', '#AmazingFacts', '#India'],
+    'history': ['#FactsInHindi', '#HistoryFacts', '#Itihas', '#RochakTathya', '#HistoricalFacts', '#DidYouKnow', '#Knowledge', '#AncientIndia', '#AmazingFacts', '#India'],
+    'science': ['#FactsInHindi', '#ScienceFacts', '#Vigyan', '#RochakTathya', '#DidYouKnow', '#Knowledge', '#Invention', '#Technology', '#AmazingFacts', '#India'],
+    'funny': ['#FactsInHindi', '#FunnyFacts', '#Majedar', '#RochakTathya', '#DidYouKnow', '#Comedy', '#Entertainment', '#Knowledge', '#AmazingFacts', '#India'],
+}
+
+if CUSTOM_CAT:
+    cat_clean = CUSTOM_CAT.replace(' ', '')
+    fallback_tags = ['facts in hindi', 'rochak tathya', 'did you know', 'amazing facts', CUSTOM_CAT, CUSTOM_CAT + ' facts', 'hindi facts']
+    fallback_hashtags = ['#FactsInHindi', '#RochakTathya', '#DidYouKnow', '#AmazingFacts', '#' + cat_clean, '#Knowledge', '#India']
+else:
+    fallback_tags = FACTS_TAGS.get(CAT, FACTS_TAGS['space'])
+    fallback_hashtags = FACTS_HASHTAGS.get(CAT, FACTS_HASHTAGS['space'])
+
+tp = 'Write YouTube Shorts metadata in casual HINGLISH (Hindi in English alphabet) for a "' + subtopic + '" FACTS video.\n\n'
+tp += 'CRITICAL RULES:\n'
+tp += '1. Title: max 60 chars, catchy and conversational (e.g., "Space ke 5 Sabse Bade Raaz"). End with 4 hashtags: #Shorts #FactsInHindi #[Topic] #RochakTathya\n'
+tp += '2. DO NOT use #MrBeast, #Viral, #Trending, #FYP\n'
+tp += '3. Description: 2-3 lines in Hinglish + blank line + 15 Hindi facts hashtags\n'
+tp += '4. Tags: 15 comma-separated SEO tags for Hindi facts (e.g., "hindi facts", "rochak tathya", "amazing facts hindi")\n\n'
+tp += 'Return JSON: {"title":"...","description":"...","tags":["tag1","tag2",...]}'
+
+ti = subtopic.title() + ' Facts #Shorts #FactsInHindi #RochakTathya'
+de = 'Kya aap jante hain? ' + subtopic + ' ke baare mein kuch mind-blowing facts!\n\n' + ' '.join(fallback_hashtags)
+tgs = ', '.join(fallback_tags)
+
+r = gq(tp, 900, 0.5, True)
+if r:
+    md = pj(r)
+    if md:
+        ti = md.get('title', '') or ti
+        for bad in ['#MrBeast', '#Viral', '#Trending', '#FYP']:
+            ti = ti.replace(bad, '')
+        ti = re.sub(r'\s+', ' ', ti).strip()
+        for h in ['#Shorts', '#FactsInHindi', '#RochakTathya']:
+            if h.lower() not in ti.lower():
+                ti = ti.rstrip() + ' ' + h
+        de = md.get('description', '') or de
+        for bad in ['#MrBeast', '#Viral', '#Trending', '#FYP']:
+            de = de.replace(bad, '')
+        if len(re.findall(r'#\w+', de)) < 15:
+            for b in fallback_hashtags:
+                if b.lower() not in de.lower() and len(re.findall(r'#\w+', de)) < 15:
+                    de += ' ' + b
+        tgd = md.get('tags', []) or []
+        bad_tags = ['mrbeast', 'viral', 'trending', 'fyp', 'viral video']
+        tgd = [t for t in tgd if t.lower() not in bad_tags]
+        if len(tgd) < 15:
+            for b in fallback_tags:
+                if b not in tgd and len(tgd) < 15:
+                    tgd.append(b)
+        if tgd:
+            tgs = ', '.join(tgd)
+
+print('Title: ' + ti[:80])
+print('Tags: ' + tgs[:80])
+
+print('STEP 8: Send to Telegram')
+tg=subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendVideo','-F','chat_id='+CID,'-F','video=@'+op,'-F','caption='+subtopic.title()+' Facts - '+str(NF)+' facts'],capture_output=True,text=True)
+fid=None
+try:
+    j=json.loads(tg.stdout)
+    if j.get('ok'):fid=j['result']['video']['file_id']
+except:pass
+
+if fid:
+    rid=sb(fid,ti,de,tgs)
+    print('Row: '+str(rid))
+    if rid:
+        kb=json.dumps({'inline_keyboard':[[{'text':'✅ Upload','callback_data':'approve_'+str(rid)},{'text':'📅 Schedule','callback_data':'schedule_'+str(rid)}],[{'text':'✏️ Custom','callback_data':'custom_'+str(rid)},{'text':'❌ Skip','callback_data':'skip_'+str(rid)}]]})
+        txt='📝 *'+subtopic.title()+' Facts*\n\n📄 Title: '+ti+'\n\n📝 Desc: '+de[:400]+'...\n\n🏷️ Tags: '+tgs[:300]+'...\n\nKya karna hai?'
+        subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','-d','chat_id='+CID,'-d','text='+txt,'-d','parse_mode=Markdown','-d','reply_markup='+kb],capture_output=True,text=True)
+        pt='🎨 CHATGPT THUMBNAIL PROMPT\n\nCopy this and paste in ChatGPT:\n\nYou are a YouTube Shorts thumbnail designer for a HINDI FACTS channel. Generate 6 thumbnails for:\n\nVIDEO TOPIC: '+subtopic.title()+'\n\nRULES:\n1. NO human faces — use only subject imagery, objects, animals, historical figures, nature, or 3D renders relevant to the topic\n2. BIG BOLD YELLOW text (in Hinglish) with THICK BLACK OUTLINE\n3. Large EMOJI in corner (😱🤯😮💥🔥)\n4. RED CIRCLE or ARROW highlighting an interesting detail\n5. HIGH CONTRAST vibrant colors\n6. Ultra-detailed, cinematic, hyper-realistic\n7. Format: 9:16 vertical\n\nSTYLES: Subject+Text+Emoji, Action+Circle, Object+Arrow, Text-Heavy, Before/After, Zoom+Detail\n\nOutput all 6 images.'
+        subprocess.run(['curl','-s','-X','POST','https://api.telegram.org/bot'+BT+'/sendMessage','--data-urlencode','chat_id='+CID,'--data-urlencode','text='+pt],capture_output=True,text=True)
+
+try:os.remove(vp);os.remove(op)
+except:pass
+
+print('All Done!')
