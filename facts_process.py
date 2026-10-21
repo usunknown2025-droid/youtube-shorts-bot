@@ -4,7 +4,10 @@ import edge_tts
 GK=os.environ['GROQ_API_KEY']
 CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
-VN=os.environ.get('VOICE_NAME','hi-IN-SwaraNeural') 
+
+# 🚨 VOICE FIX: Hardcoded Hindi Voice taaki English na bole
+VN = 'hi-IN-SwaraNeural' 
+
 CAT=os.environ.get('CATEGORY','space')
 CUSTOM_CAT=os.environ.get('CUSTOM_CATEGORY','')
 NF=int(os.environ.get('NUM_FACTS','5'))
@@ -91,20 +94,28 @@ def clip(inp,out,dur):
     r=subprocess.run(['ffmpeg','-y','-ss',str(st),'-t',str(dur),'-i',inp,'-vf',vf,'-c:v','libx264','-preset','fast','-crf','23','-an',out],capture_output=True)
     return r.returncode==0 and os.path.exists(out)
 
-async def generate_tts(text, path):
-    c = edge_tts.Communicate(text, VN, rate="+10%")
-    words = []
-    with open(path, 'wb') as f:
-        async for chunk in c.stream():
-            if chunk['type'] == 'audio':
-                f.write(chunk['data'])
-            elif chunk['type'] == 'WordBoundary':
-                words.append({
-                    'text': chunk['text'],
-                    'offset': chunk['offset'] / 10000000.0,
-                    'duration': chunk['duration'] / 10000000.0
-                })
-    return words
+def generate_tts_retry(text, path, retries=3):
+    async def g():
+        c = edge_tts.Communicate(text, VN, rate="+10%")
+        words = []
+        with open(path, 'wb') as f:
+            async for chunk in c.stream():
+                if chunk['type'] == 'audio':
+                    f.write(chunk['data'])
+                elif chunk['type'] == 'WordBoundary':
+                    words.append({
+                        'text': chunk['text'],
+                        'offset': chunk['offset'] / 10000000.0,
+                        'duration': chunk['duration'] / 10000000.0
+                    })
+        return words
+    for i in range(retries):
+        try:
+            return asyncio.run(g())
+        except Exception as e:
+            print(f'TTS attempt {i+1} failed: {e}')
+            time.sleep(2)
+    return []
 
 def atime(s):
     if s < 0:
@@ -330,19 +341,22 @@ current_time = 0.0
 for idx, fact in enumerate(facts):
     fact_vp = f'fact_{idx}.mp3'
     try:
-        fw = asyncio.run(generate_tts(fact, fact_vp))
+        fw = generate_tts_retry(fact, fact_vp)
         dur = probe(fact_vp)
-        if dur > 0.5:
-            audio_files.append(fact_vp)
-            start_t = current_time
-            end_t = start_t + dur
-            fact_timings.append((start_t, end_t))
-            for w in fw:
-                w['offset'] += start_t
-                word_times.append(w)
-            current_time = end_t + 0.3
-        else:
-            print(f'Fact {idx} audio too short, skipping')
+        print(f'Fact {idx} audio dur: {dur}s')
+        if dur < 0.5:
+            print(f'Fact {idx} audio too short, using 2s silence')
+            subprocess.run(['ffmpeg','-y','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t','2','-q:a','9','-acodec','libmp3lame', fact_vp],capture_output=True)
+            dur = 2.0
+            
+        audio_files.append(fact_vp)
+        start_t = current_time
+        end_t = start_t + dur
+        fact_timings.append((start_t, end_t))
+        for w in fw:
+            w['offset'] += start_t
+            word_times.append(w)
+        current_time = end_t + 0.2
     except Exception as e:
         print(f'TTS error on fact {idx}: ' + str(e))
 
@@ -351,7 +365,7 @@ if not audio_files:
     subprocess.run(['ffmpeg','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t',str(NF*4),'-q:a','9','-acodec','libmp3lame',vp])
     atd = NF * 4
 else:
-    subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '0.3', '-q:a', '9', '-acodec', 'libmp3lame', 'silence.mp3'], capture_output=True)
+    subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '0.2', '-q:a', '9', '-acodec', 'libmp3lame', 'silence.mp3'], capture_output=True)
     with open('audio_list.txt', 'w') as f:
         for af in audio_files:
             f.write(f"file '{os.path.abspath(af)}'\n")
@@ -375,7 +389,7 @@ clips=[]
 for i,u in enumerate(urls):
     if i >= len(fact_timings):
         break
-    dur = fact_timings[i][1] - fact_timings[i][0] + 0.3
+    dur = fact_timings[i][1] - fact_timings[i][0] + 0.2
     cp = 'cc_'+str(i)+'.mp4'
     success = False
     p='c_'+str(i)+'.mp4'
@@ -386,7 +400,7 @@ for i,u in enumerate(urls):
         except:pass
     
     if not success:
-        print(f'Clip {i} failed, using black screen')
+        print(f'Clip {i} failed or too short, using black screen')
         subprocess.run(['ffmpeg','-y','-f','lavfi','-i','color=c=black:s=720x1280:r=30','-t',str(dur),'-c:v','libx264','-preset','fast','-crf','23','-pix_fmt','yuv420p','-an',cp],capture_output=True)
     clips.append(cp)
     if len(clips)>=NF:break
@@ -401,7 +415,10 @@ subprocess.run(['ffmpeg','-y','-f','concat','-safe','0','-i','l.txt','-c','copy'
 ap='s.ass'
 open(ap,'w',encoding='utf-8').write(mksubs(facts, word_times, fact_timings))
 op='facts_short.mp4'
-subprocess.run(['ffmpeg','-y','-i','raw.mp4','-i',vp,'-filter_complex','[0:v]ass='+ap+'[v];[1:a]volume=1.0[a]','-map','[v]','-map','[a]','-shortest','-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',op],capture_output=True)
+
+# 🚨 FIX: '-shortest' hataya aur '-t' (audio duration) lagaya taaki video pura bane
+subprocess.run(['ffmpeg','-y','-i','raw.mp4','-i',vp,'-filter_complex','[0:v]ass='+ap+'[v];[1:a]volume=1.0[a]','-map','[v]','-map','[a]','-t',str(atd),'-c:v','libx264','-preset','fast','-crf','23','-c:a','aac','-b:a','128k',op],capture_output=True)
+
 for c in clips:
     try:os.remove(c)
     except:pass
