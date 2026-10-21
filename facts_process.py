@@ -97,7 +97,7 @@ def clip(inp,out,dur):
 
 def generate_tts_single(text, path, retries=3):
     async def g():
-        c = edge_tts.Communicate(text, VN, rate="+18%")
+        c = edge_tts.Communicate(text, VN, rate="+15%")
         words = []
         with open(path, 'wb') as f:
             async for chunk in c.stream():
@@ -288,15 +288,17 @@ print('Already used: ' + str(len(used_facts)) + ' facts')
 
 print('STEP 1: Generate connected facts in Hindi')
 seed = random.randint(10000, 99999)
-# 🚨 MAJOR PROMPT CHANGE: Viral TikTok/Reels style, No lecture.
-p = 'Generate ' + str(NF) + ' viral, standalone facts about "' + subtopic + '".\n\n'
+# 🚨 EXACT FORMAT FIX
+p = 'Generate ' + str(NF) + ' viral facts about "' + subtopic + '".\n\n'
 p += 'Random seed: ' + str(seed) + '\n\n'
 p += 'CRITICAL RULES:\n'
-p += '1. TONE: Extremely conversational, engaging, and mind-blowing (like a viral Indian YouTuber). Do NOT write a boring essay or lecture.\n'
-p += '2. FORMAT: Each fact should be a standalone shocker. Give a short hook then the explanation. (e.g., "Octopus ke 3 hearts hote hain! Is samundari jeev ke paas ek nahi, teen hearts hain!")\n'
-p += '3. LANGUAGE: Natural HINDI (Devanagari script) with common English words (like "space", "planet", "brain", "process" written in Devanagari).\n'
-p += '4. PERSPECTIVE: Female perspective (as if a girl is explaining to a friend).\n'
-p += '5. LENGTH: Keep each fact between 10-15 words. (PUNCHY AND SHORT).\n'
+p += '1. FORMAT: EACH fact MUST be structured exactly like this example:\n'
+p += '   "Octopus ke 3 hearts hote hain! Is samundari jeev ke paas ek nahi, teen hearts hain!"\n'
+p += '   (First a shocking one-liner, then a conversational explanation. DO NOT write a long paragraph).\n'
+p += '2. LANGUAGE: Natural Hindi (Devanagari) with conversational English words.\n'
+p += '3. TONE: Very energetic, mind-blowing, and casual (like a TikTok/Reels creator talking to a friend).\n'
+p += '4. FEMALE perspective.\n'
+p += '5. Each fact max 15-20 words.\n'
 p += '6. Focus ONLY on "' + subtopic + '"\n\n'
 if used_facts:
     p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
@@ -313,7 +315,6 @@ if facts and used_facts:
     used_lower=[u.lower().strip() for u in used_facts]
     fresh=[f for f in facts if f.lower().strip() not in used_lower]
     if len(fresh)<NF:
-        print('Regenerating (duplicates found)...')
         p2=p+'\n\nYour previous output had duplicates. Generate entirely different facts.'
         r2=gq(p2,1200,1.0,True)
         if r2:
@@ -326,9 +327,8 @@ if facts and used_facts:
         facts=fresh
 
 if not facts:
-    facts=['स्पेस में साउंड नहीं होता है','एस्ट्रोनॉट्स अपनी धड़कन सुन सकते हैं','ये 150 BPM तक जा सकती है','इसलिए वो पानी के अंदर ट्रेनिंग करते हैं','इस ट्रेनिंग को पूल ऑफ फियर कहते हैं']
+    facts=['Octopus ke 3 hearts hote hain! Is samundari jeev ke paas ek nahi, teen hearts hain!','Venus par ek din, ek saal se lamba hai! Socho, ek planet jahan rotation ko orbit se zyada waqt lagta hai!','Tumhara brain pain ko process karta hai, lekin khud pain feel nahi karta! Isi liye brain surgery kuch situations mein patient ke awake hone par bhi ki ja sakti hai.']
 
-# 🚨 FIX: Force "Kya aap jante ho" at the very beginning of the script
 hook = "क्या आप जानते हो? "
 if not facts[0].startswith("क्या आप जानते हो") and not facts[0].startswith("देखो"):
     facts[0] = hook + facts[0]
@@ -336,22 +336,20 @@ if not facts[0].startswith("क्या आप जानते हो") and not
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
 
-print('Saving facts to history EARLY')
 save_used_facts(topic_name, facts)
 
-print('STEP 2: Voiceover with word timing (Single Audio)')
+print('STEP 2: Voiceover with word timing')
 vp='voice.mp3'
-full_script = " ".join(facts)
+# Add a small 0.4s pause between facts for natural flow
+full_script = " ".join([f + " ... " for f in facts]) 
 word_times = generate_tts_single(full_script, vp)
 atd = probe(vp)
 
 if atd < 0.5:
-    print('All TTS failed, fallback to silence')
     subprocess.run(['ffmpeg','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t',str(NF*4),'-q:a','9','-acodec','libmp3lame',vp])
     atd = NF * 4
 
 if not word_times:
-    print('Word boundaries missing, estimating for full script...')
     word_times = estimate_word_times(full_script, atd)
 
 print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
@@ -375,7 +373,6 @@ for i,u in enumerate(urls):
         except:pass
     
     if not success:
-        print(f'Clip {i} failed or too short, using black screen')
         subprocess.run(['ffmpeg','-y','-f','lavfi','-i','color=c=black:s=720x1280:r=30','-t',str(dur),'-c:v','libx264','-preset','fast','-crf','23','-pix_fmt','yuv420p','-an',cp],capture_output=True)
     clips.append(cp)
     if len(clips)>=NF:break
