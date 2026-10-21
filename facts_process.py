@@ -93,8 +93,8 @@ def clip(inp,out,dur):
 
 def tts_with_timing(text, path):
     async def g():
-        # Speed wapas +10% par set kar di hai
-        c = edge_tts.Communicate(text, VN, rate="+10%")
+        # Speed +10.1% set kar di hai
+        c = edge_tts.Communicate(text, VN, rate="+10.1%")
         words = []
         with open(path, 'wb') as f:
             async for chunk in c.stream():
