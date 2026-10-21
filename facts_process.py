@@ -91,41 +91,20 @@ def clip(inp,out,dur):
     r=subprocess.run(['ffmpeg','-y','-ss',str(st),'-t',str(dur),'-i',inp,'-vf',vf,'-c:v','libx264','-preset','fast','-crf','23','-an',out],capture_output=True)
     return r.returncode==0 and os.path.exists(out)
 
-# Yahan humne audio generate karne ka tarika thoda badla hai taaki audio cut off na ho
-def tts_with_timing(text, path):
-    async def g():
-        c = edge_tts.Communicate(text, VN, rate="+10%")
-        words = []
-        # Audio file ko write mode mein open karo
-        with open(path, 'wb') as f:
-            async for chunk in c.stream():
-                if chunk['type'] == 'audio':
-                    f.write(chunk['data'])
-                elif chunk['type'] == 'WordBoundary':
-                    words.append({
-                        'text': chunk['text'],
-                        'offset': chunk['offset'] / 10000000.0,
-                        'duration': chunk['duration'] / 10000000.0
-                    })
-        return words
-    try:
-        return asyncio.run(g())
-    except Exception as e:
-        print('TTS error: ' + str(e))
-        return []
-
-def estimate_word_times(text, total_duration):
-    words = [w for w in text.split() if w.strip()]
-    if not words:
-        return []
-    total_weight = sum(len(w) + 1 for w in words)
-    times = []
-    t = 0.0
-    for w in words:
-        dur = ((len(w) + 1) / total_weight) * total_duration
-        times.append({'text': w, 'offset': t, 'duration': dur})
-        t += dur
-    return times
+async def generate_tts(text, path):
+    c = edge_tts.Communicate(text, VN, rate="+10%")
+    words = []
+    with open(path, 'wb') as f:
+        async for chunk in c.stream():
+            if chunk['type'] == 'audio':
+                f.write(chunk['data'])
+            elif chunk['type'] == 'WordBoundary':
+                words.append({
+                    'text': chunk['text'],
+                    'offset': chunk['offset'] / 10000000.0,
+                    'duration': chunk['duration'] / 10000000.0
+                })
+    return words
 
 def atime(s):
     if s < 0:
@@ -199,7 +178,6 @@ def mksubs(facts, word_times, fact_timings):
     POS = '{\\an5\\pos(360,1000)}'
     WHITE = '{\\c&H00FFFFFF&}'
     YELLOW = '{\\c&H0000FFFF&}'
-    # Yahan Noto Sans Devanagari font use kiya hai taaki caption mein box na aaye
     L = [
         '[Script Info]',
         'ScriptType: v4.00+',
@@ -226,31 +204,26 @@ def mksubs(facts, word_times, fact_timings):
             text = ' '.join(words[:mid]) + '\\N' + ' '.join(words[mid:])
             L.append('Dialogue: 0,' + atime(s) + ',' + atime(e) + ',Fact,,0,0,0,,' + POS + text)
         return '\n'.join(L)
-    all_words = []
-    for fact in facts:
-        for w in fact.split():
-            if w.strip():
-                all_words.append(w)
     CHUNK = 4
-    for i in range(0, len(all_words), CHUNK):
-        chunk = all_words[i:i+CHUNK]
-        if i + len(chunk) - 1 >= len(word_times):
-            break
+    for i in range(0, len(word_times), CHUNK):
+        chunk = word_times[i:i+CHUNK]
+        if len(chunk) == 0:
+            continue
         if len(chunk) == 1:
             mid = 1
         else:
             mid = (len(chunk) + 1) // 2
         for j in range(len(chunk)):
-            wt = word_times[i + j]
+            wt = chunk[j]
             start = wt['offset']
             if j + 1 < len(chunk):
-                end = word_times[i + j + 1]['offset']
+                end = chunk[j + 1]['offset']
             else:
                 end = wt['offset'] + wt['duration'] + 0.15
             end = max(end, start + 0.1)
             parts = []
             for k, w in enumerate(chunk):
-                wu = w
+                wu = w['text']
                 if k == j:
                     parts.append(YELLOW + wu + WHITE)
                 else:
@@ -349,60 +322,73 @@ save_used_facts(topic_name, facts)
 
 print('STEP 2: Voiceover with word timing')
 vp='voice.mp3'
-# Audio cut off na ho isliye ek-ek karke join kar rahe hain
-full='. '.join(facts)+'.'
-word_times = tts_with_timing(full, vp)
-
-# Agar audio file 1000 bytes se choti hai matlab audio fail ho gaya
-if not os.path.exists(vp) or os.path.getsize(vp) < 1000:
-    print('TTS failed, fallback to silence')
-    subprocess.run(['ffmpeg','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t',str(NF*4),'-q:a','9','-acodec','libmp3lame',vp])
-    word_times = []
-atd=probe(vp)
-print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
-if not word_times:
-    print('Word boundaries missing — estimating from duration')
-    word_times = estimate_word_times(full, atd)
-    print('Estimated ' + str(len(word_times)) + ' word timings')
-
+audio_files = []
+word_times = []
 fact_timings = []
-if word_times:
-    wi = 0
-    for fact in facts:
-        fw = [w for w in fact.split() if w.strip()]
-        n = len(fw)
-        if n == 0:
-            continue
-        if wi + n <= len(word_times):
-            start = word_times[wi]['offset']
-            last = word_times[wi + n - 1]
-            end = last['offset'] + last['duration']
-        elif wi < len(word_times):
-            start = word_times[wi]['offset']
-            end = atd
+current_time = 0.0
+
+for idx, fact in enumerate(facts):
+    fact_vp = f'fact_{idx}.mp3'
+    try:
+        fw = asyncio.run(generate_tts(fact, fact_vp))
+        dur = probe(fact_vp)
+        if dur > 0.5:
+            audio_files.append(fact_vp)
+            start_t = current_time
+            end_t = start_t + dur
+            fact_timings.append((start_t, end_t))
+            for w in fw:
+                w['offset'] += start_t
+                word_times.append(w)
+            current_time = end_t + 0.3
         else:
-            start = atd
-            end = start + 1
-        fact_timings.append((start, end))
-        wi += n
+            print(f'Fact {idx} audio too short, skipping')
+    except Exception as e:
+        print(f'TTS error on fact {idx}: ' + str(e))
+
+if not audio_files:
+    print('All TTS failed, fallback to silence')
+    subprocess.run(['ffmpeg','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t',str(NF*4),'-q:a','9','-acodec','libmp3lame',vp])
+    atd = NF * 4
 else:
-    pt = atd / max(len(facts), 1)
-    fact_timings = [(i * pt, (i + 1) * pt) for i in range(len(facts))]
+    subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '0.3', '-q:a', '9', '-acodec', 'libmp3lame', 'silence.mp3'], capture_output=True)
+    with open('audio_list.txt', 'w') as f:
+        for af in audio_files:
+            f.write(f"file '{os.path.abspath(af)}'\n")
+            f.write(f"file '{os.path.abspath('silence.mp3')}'\n")
+    subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'audio_list.txt', '-c', 'copy', vp], capture_output=True)
+    atd = probe(vp)
+    os.remove('audio_list.txt')
+    os.remove('silence.mp3')
+    for af in audio_files:
+        try: os.remove(af)
+        except: pass
+
+print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
 
 print('STEP 3: Download stock videos')
 urls=get_vids(kw,NF)
 print('Got '+str(len(urls))+' videos')
 
 print('STEP 4: Create clips')
-per=atd/NF
 clips=[]
 for i,u in enumerate(urls):
+    if i >= len(fact_timings):
+        break
+    dur = fact_timings[i][1] - fact_timings[i][0] + 0.3
+    cp = 'cc_'+str(i)+'.mp4'
+    success = False
     p='c_'+str(i)+'.mp4'
     if dwn(u,p):
-        cp='cc_'+str(i)+'.mp4'
-        if clip(p,cp,per):clips.append(cp)
+        if clip(p,cp,dur):
+            success = True
         try:os.remove(p)
         except:pass
+    
+    if not success:
+        print(f'Clip {i} failed, using black screen')
+        subprocess.run(['ffmpeg','-y','-f','lavfi','-i','color=c=black:s=720x1280:r=30','-t',str(dur),'-c:v','libx264','-preset','fast','-crf','23','-pix_fmt','yuv420p','-an',cp],capture_output=True)
+    clips.append(cp)
     if len(clips)>=NF:break
 print('Clips: '+str(len(clips)))
 
