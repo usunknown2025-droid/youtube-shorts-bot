@@ -4,7 +4,7 @@ import edge_tts
 GK=os.environ['GROQ_API_KEY']
 CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
-VN=os.environ.get('VOICE_NAME','hi-IN-SwaraNeural') # Female Voice
+VN=os.environ.get('VOICE_NAME','hi-IN-SwaraNeural') 
 CAT=os.environ.get('CATEGORY','space')
 CUSTOM_CAT=os.environ.get('CUSTOM_CATEGORY','')
 NF=int(os.environ.get('NUM_FACTS','5'))
@@ -93,8 +93,8 @@ def clip(inp,out,dur):
 
 def tts_with_timing(text, path):
     async def g():
-        # Speed +10.1% set kar di hai
-        c = edge_tts.Communicate(text, VN, rate="+10.1%")
+        # Speed +12% kar di hai taaki fast aur energetic lage
+        c = edge_tts.Communicate(text, VN, rate="+12%")
         words = []
         with open(path, 'wb') as f:
             async for chunk in c.stream():
@@ -198,6 +198,7 @@ def mksubs(facts, word_times, fact_timings):
     POS = '{\\an5\\pos(360,1000)}'
     WHITE = '{\\c&H00FFFFFF&}'
     YELLOW = '{\\c&H0000FFFF&}'
+    # Yahan font change karke 'Noto Sans Devanagari' kar diya hai
     L = [
         '[Script Info]',
         'ScriptType: v4.00+',
@@ -208,7 +209,7 @@ def mksubs(facts, word_times, fact_timings):
         '',
         '[V4+ Styles]',
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-        'Style: Fact,DejaVu Sans,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,5,25,25,0,1',
+        'Style: Fact,Noto Sans Devanagari,58,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,3,5,25,25,0,1',
         '',
         '[Events]',
         'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
