@@ -93,8 +93,8 @@ def clip(inp,out,dur):
 
 def tts_with_timing(text, path):
     async def g():
-        # Speed badha di hai (+10%) taaki energetic lage
-        c = edge_tts.Communicate(text, VN, rate="+10%")
+        # Speed +13% kar di hai
+        c = edge_tts.Communicate(text, VN, rate="+13%")
         words = []
         with open(path, 'wb') as f:
             async for chunk in c.stream():
@@ -219,7 +219,7 @@ def mksubs(facts, word_times, fact_timings):
                 s, e = fact_timings[i]
             else:
                 s, e = 0, 2
-            words = f.upper().split()
+            words = f.split()
             mid = (len(words) + 1) // 2
             text = ' '.join(words[:mid]) + '\\N' + ' '.join(words[mid:])
             L.append('Dialogue: 0,' + atime(s) + ',' + atime(e) + ',Fact,,0,0,0,,' + POS + text)
@@ -248,7 +248,7 @@ def mksubs(facts, word_times, fact_timings):
             end = max(end, start + 0.1)
             parts = []
             for k, w in enumerate(chunk):
-                wu = w.upper()
+                wu = w
                 if k == j:
                     parts.append(YELLOW + wu + WHITE)
                 else:
@@ -272,7 +272,7 @@ def sb(fid,ti,de,tg):
     except:pass
     return None
 
-print('FACTS GENERATOR (HINGLISH VERSION)')
+print('FACTS GENERATOR (HINDI VERSION)')
 print('Category: '+CAT+' Facts: '+str(NF))
 
 if CUSTOM_CAT:
@@ -299,15 +299,15 @@ print('Fetching previously used facts...')
 used_facts = get_used_facts(topic_name, 500)
 print('Already used: ' + str(len(used_facts)) + ' facts')
 
-print('STEP 1: Generate connected facts in HINGLISH')
+print('STEP 1: Generate connected facts in Hindi')
 seed = random.randint(10000, 99999)
 p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + subtopic + '" that flow like a mini-story.\n\n'
 p += 'Random seed: ' + str(seed) + '\n\n'
 p += 'CRITICAL RULES:\n'
-p += '1. Write the script in a highly conversational HINGLISH style.\n'
-p += '2. Write from a FEMALE perspective (as if a girl is explaining to a friend). Avoid male-centric slang like "bhai" or "yaar".\n'
-p += '3. Add natural human fillers (e.g., "Dekho...", "Socho zara...", "Kya aapko pata hai?", "Actually...").\n'
-p += '4. DO NOT use formal/bookish Hindi. Use natural Indian words.\n'
+p += '1. Write the script in natural, conversational HINDI (Devanagari script) exactly like a young Indian YouTuber.\n'
+p += '2. Use English loanwords but write them in Devanagari (e.g., "स्पेस", "एक्चुअली", "फैक्ट्स", "वीडियो").\n'
+p += '3. Write from a FEMALE perspective (as if a girl is explaining to a friend).\n'
+p += '4. Add natural human fillers (e.g., "देखो...", "सोचो ज़रा...", "क्या आपको पता है?").\n'
 p += '5. Each fact MUST connect to the previous one (like a story).\n'
 p += '6. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
 p += '7. Focus ONLY on "' + subtopic + '"\n\n'
@@ -316,7 +316,7 @@ if used_facts:
     for u in used_facts[:100]:
         p += '- ' + u + '\n'
     p += '\nGenerate COMPLETELY NEW and UNIQUE facts.\n\n'
-p += 'Return JSON: {"facts":["hinglish_fact_1","hinglish_fact_2",...]}'
+p += 'Return JSON: {"facts":["hindi_fact_1","hindi_fact_2",...]}'
 r=gq(p,1200,0.95,True)
 facts=[]
 if r:
@@ -338,7 +338,7 @@ if facts and used_facts:
     else:
         facts=fresh
 if not facts:
-    facts=['Dekho, Space mein sound nahi hota','Astronauts apni heartbeat sun sakte hain','Ye 150 BPM tak ja sakti hai','Isliye wo underwater train karte hain','Is training ko pool of fear kehte hain']
+    facts=['देखो, स्पेस में साउंड नहीं होता','एस्ट्रोनॉट्स अपनी धड़कन सुन सकते हैं','ये 150 BPM तक जा सकती है','इसलिए वो पानी के अंदर ट्रेनिंग करते हैं','इस ट्रेनिंग को पूल ऑफ फियर कहते हैं']
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
 
@@ -443,12 +443,12 @@ else:
     fallback_tags = FACTS_TAGS.get(CAT, FACTS_TAGS['space'])
     fallback_hashtags = FACTS_HASHTAGS.get(CAT, FACTS_HASHTAGS['space'])
 
-tp = 'Write YouTube Shorts metadata in casual HINGLISH (Hindi in English alphabet) for a "' + subtopic + '" FACTS video.\n\n'
+tp = 'Write YouTube Shorts metadata in casual HINGLISH for a "' + subtopic + '" FACTS video.\n\n'
 tp += 'CRITICAL RULES:\n'
-tp += '1. Title: max 60 chars, catchy and conversational (e.g., "Space ke 5 Sabse Bade Raaz"). End with 4 hashtags: #Shorts #FactsInHindi #[Topic] #RochakTathya\n'
+tp += '1. Title: max 60 chars, catchy and conversational. End with 4 hashtags: #Shorts #FactsInHindi #[Topic] #RochakTathya\n'
 tp += '2. DO NOT use #MrBeast, #Viral, #Trending, #FYP\n'
 tp += '3. Description: 2-3 lines in Hinglish + blank line + 15 Hindi facts hashtags\n'
-tp += '4. Tags: 15 comma-separated SEO tags for Hindi facts (e.g., "hindi facts", "rochak tathya", "amazing facts hindi")\n\n'
+tp += '4. Tags: 15 comma-separated SEO tags for Hindi facts\n\n'
 tp += 'Return JSON: {"title":"...","description":"...","tags":["tag1","tag2",...]}'
 
 ti = subtopic.title() + ' Facts #Shorts #FactsInHindi #RochakTathya'
