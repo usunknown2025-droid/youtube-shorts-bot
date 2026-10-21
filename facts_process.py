@@ -6,7 +6,6 @@ CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
 VN = 'hi-IN-SwaraNeural' 
 
-# 🚨 FIX: Category aur Custom Category ko sahi se check karo
 CAT = os.environ.get('CATEGORY', 'space').lower().strip()
 CUSTOM_CAT = os.environ.get('CUSTOM_CATEGORY', '').strip()
 if CUSTOM_CAT.lower() in ['undefined', 'null']:
@@ -276,7 +275,6 @@ def sb(fid,ti,de,tg):
 print('FACTS GENERATOR (HINDI VERSION)')
 print('Category: '+CAT+' Facts: '+str(NF))
 
-# 🚨 FIX: Sirf tabhi custom use karo jab CAT 'custom' ho
 if CAT == 'custom' and CUSTOM_CAT:
     topic_name = CUSTOM_CAT
     subtopic = topic_name
@@ -308,13 +306,12 @@ seed = random.randint(10000, 99999)
 p = 'Generate ' + str(NF) + ' CONNECTED facts about "' + subtopic + '" that flow like a mini-story.\n\n'
 p += 'Random seed: ' + str(seed) + '\n\n'
 p += 'CRITICAL RULES:\n'
-p += '1. Start the very first fact with a hook: "क्या आपको पता है?" or "देखो...".\n'
-p += '2. Write in natural, conversational HINDI (Devanagari script) exactly like a young Indian YouTuber.\n'
-p += '3. DO NOT drop words like "है", "की", "का", "हैं". Write full sentences.\n'
-p += '4. Write from a FEMALE perspective.\n'
-p += '5. Each fact MUST connect to the previous one (like a story).\n'
-p += '6. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
-p += '7. Focus ONLY on "' + subtopic + '"\n\n'
+p += '1. Write in natural, conversational HINDI (Devanagari script) exactly like a young Indian YouTuber.\n'
+p += '2. DO NOT drop words like "है", "की", "का", "हैं". Write full sentences.\n'
+p += '3. Write from a FEMALE perspective.\n'
+p += '4. Each fact MUST connect to the previous one (like a story).\n'
+p += '5. Each fact: 6-10 words maximum (SHORT and PUNCHY!).\n'
+p += '6. Focus ONLY on "' + subtopic + '"\n\n'
 if used_facts:
     p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
     for u in used_facts[:100]:
@@ -341,8 +338,15 @@ if facts and used_facts:
             facts=fresh
     else:
         facts=fresh
+
 if not facts:
-    facts=['क्या आपको पता है? स्पेस में साउंड नहीं होता है','एस्ट्रोनॉट्स अपनी धड़कन सुन सकते हैं','ये 150 BPM तक जा सकती है','इसलिए वो पानी के अंदर ट्रेनिंग करते हैं','इस ट्रेनिंग को पूल ऑफ फियर कहते हैं']
+    facts=['स्पेस में साउंड नहीं होता है','एस्ट्रोनॉट्स अपनी धड़कन सुन सकते हैं','ये 150 BPM तक जा सकती है','इसलिए वो पानी के अंदर ट्रेनिंग करते हैं','इस ट्रेनिंग को पूल ऑफ फियर कहते हैं']
+
+# 🚨 FIX: Force "Kya aap jante ho" at the very beginning of the script
+hook = "क्या आपको पता है? "
+if not facts[0].startswith("क्या आपको पता है") and not facts[0].startswith("देखो"):
+    facts[0] = hook + facts[0]
+
 facts=facts[:NF]
 for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
 
@@ -379,7 +383,9 @@ for idx, fact in enumerate(facts):
         for w in fw:
             w['offset'] += start_t
             word_times.append(w)
-        current_time = end_t + 0.2
+        
+        # 🚨 FIX: No extra gap. Agla fact isi ke turant baad shuru hoga.
+        current_time = end_t 
     except Exception as e:
         print(f'TTS error on fact {idx}: ' + str(e))
 
@@ -388,15 +394,13 @@ if not audio_files:
     subprocess.run(['ffmpeg','-f','lavfi','-i','anullsrc=r=44100:cl=stereo','-t',str(NF*4),'-q:a','9','-acodec','libmp3lame',vp])
     atd = NF * 4
 else:
-    subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '0.2', '-q:a', '9', '-acodec', 'libmp3lame', 'silence.mp3'], capture_output=True)
     with open('audio_list.txt', 'w') as f:
         for af in audio_files:
             f.write(f"file '{os.path.abspath(af)}'\n")
-            f.write(f"file '{os.path.abspath('silence.mp3')}'\n")
+    # Concat directly without silence file
     subprocess.run(['ffmpeg', '-y', '-f', 'concat', '-safe', '0', '-i', 'audio_list.txt', '-c', 'copy', vp], capture_output=True)
     atd = probe(vp)
     os.remove('audio_list.txt')
-    os.remove('silence.mp3')
     for af in audio_files:
         try: os.remove(af)
         except: pass
@@ -412,7 +416,7 @@ clips=[]
 for i,u in enumerate(urls):
     if i >= len(fact_timings):
         break
-    dur = fact_timings[i][1] - fact_timings[i][0] + 0.2
+    dur = fact_timings[i][1] - fact_timings[i][0]
     cp = 'cc_'+str(i)+'.mp4'
     success = False
     p='c_'+str(i)+'.mp4'
