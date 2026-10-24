@@ -4,7 +4,8 @@ import edge_tts
 GK=os.environ['GROQ_API_KEY']
 CID=os.environ.get('CHAT_ID','')
 BT=os.environ.get('BOT_TOKEN','')
-VN = 'hi-IN-SwaraNeural' 
+VN = os.environ.get('VOICE_NAME', 'hi-IN-SwaraNeural')
+
 
 CAT = os.environ.get('CATEGORY', 'space').lower().strip()
 CUSTOM_CAT = os.environ.get('CUSTOM_CATEGORY', '').strip()
@@ -72,18 +73,23 @@ def probe(p):
         return float(r.stdout.strip())
     except:return 0
 
-def get_vids(kw,count=5):
+def get_vids(kw,count=1):
+    """Fetch clips for one specific scene; don't silently substitute unrelated footage."""
+    if not PK:
+        print('PIXABAY_API_KEY missing; cannot safely choose topic-matched visuals.')
+        return []
     vids=[]
-    for _ in range(10):
+    for attempt in range(3):
         try:
-            r=requests.get('https://pixabay.com/api/videos/',params={'key':PK,'q':kw,'per_page':5,'safesearch':'true','video_type':'film'},timeout=30).json()
+            r=requests.get('https://pixabay.com/api/videos/',params={'key':PK,'q':kw,'per_page':10,'safesearch':'true','video_type':'film'},timeout=30).json()
             if 'hits' in r:
                 for h in r['hits']:
-                    u=h['videos'].get('medium',{}).get('url') or h['videos'].get('small',{}).get('url')
-                    if u and u not in vids:vids.append(u)
-        except:pass
-        if len(vids)>=count:break
-        time.sleep(0.3)
+                    videos=h.get('videos',{})
+                    u=videos.get('large',{}).get('url') or videos.get('medium',{}).get('url') or videos.get('small',{}).get('url')
+                    if u and u not in vids: vids.append(u)
+        except Exception as e: print('Pixabay search error:',str(e)[:160])
+        if vids: break
+        time.sleep(1)
     return vids[:count]
 
 def clip(inp,out,dur):
@@ -286,57 +292,44 @@ print('Fetching previously used facts...')
 used_facts = get_used_facts(topic_name, 500)
 print('Already used: ' + str(len(used_facts)) + ' facts')
 
-print('STEP 1: Generate connected facts in Hindi')
+print('STEP 1: Generate a connected mini-story in conversational Hindi')
 seed = random.randint(10000, 99999)
-# 🚨 EXACT FORMAT FIX
-p = 'Generate ' + str(NF) + ' viral facts about "' + subtopic + '".\n\n'
-p += 'Random seed: ' + str(seed) + '\n\n'
-p += 'CRITICAL RULES:\n'
-p += '1. FORMAT: EACH fact MUST be structured exactly like this example:\n'
-p += '   "Octopus ke 3 hearts hote hain! Is samundari jeev ke paas ek nahi, teen hearts hain!"\n'
-p += '   (First a shocking one-liner, then a conversational explanation. DO NOT write a long paragraph).\n'
-p += '2. LANGUAGE: Natural Hindi (Devanagari) with conversational English words.\n'
-p += '3. TONE: Very energetic, mind-blowing, and casual (like a TikTok/Reels creator talking to a friend).\n'
-p += '4. FEMALE perspective.\n'
-p += '5. Each fact max 15-20 words.\n'
-p += '6. Focus ONLY on "' + subtopic + '"\n\n'
+p = 'Create exactly ' + str(NF) + ' connected segments for a Hindi YouTube Short about "' + subtopic + '".\n'
+p += 'Random seed: ' + str(seed) + '\n'
+p += 'This must feel like ONE mini-story, not a random list. Structure: (1) strong curiosity hook, (2) setup/context, (3) surprising evidence or escalation, (4) reveal/payoff, (5) memorable closing/question if there are enough segments.\n'
+p += 'Use natural casual Hinglish in Devanagari, as if talking to a friend. No formal textbook tone, no repeated generic "kya aap jaante hain" intros. Each segment should be 12-28 words and flow naturally into the next.\n'
+p += 'Be accurate: never invent facts, statistics, quotes, or certainty. Prefer established facts. If unsure, choose a different well-established fact. No clickbait that the story does not pay off.\n'
+p += 'Keep every segment strictly about ' + subtopic + '. Return JSON only: {"facts":["segment 1", "segment 2", ...]}.\n'
 if used_facts:
-    p += 'DO NOT REPEAT OR REPHRASE THESE ALREADY-USED FACTS:\n'
-    for u in used_facts[:100]:
-        p += '- ' + u + '\n'
-    p += '\nGenerate COMPLETELY NEW and UNIQUE facts.\n\n'
-p += 'Return JSON: {"facts":["hindi_fact_1","hindi_fact_2",...]}'
-r=gq(p,1200,0.95,True)
+    p += 'Avoid repeating or paraphrasing these previous scripts:\n' + '\n'.join('- '+u for u in used_facts[:80]) + '\n'
+r=gq(p,1600,0.65,True)
 facts=[]
 if r:
     d=pj(r)
-    if d:facts=d.get('facts',[])
-if facts and used_facts:
-    used_lower=[u.lower().strip() for u in used_facts]
-    fresh=[f for f in facts if f.lower().strip() not in used_lower]
-    if len(fresh)<NF:
-        p2=p+'\n\nYour previous output had duplicates. Generate entirely different facts.'
-        r2=gq(p2,1200,1.0,True)
-        if r2:
-            d2=pj(r2)
-            if d2:
-                facts=d2.get('facts',[])
-        else:
-            facts=fresh
-    else:
-        facts=fresh
-
-if not facts:
-    facts=['Octopus ke 3 hearts hote hain! Is samundari jeev ke paas ek nahi, teen hearts hain!','Venus par ek din, ek saal se lamba hai! Socho, ek planet jahan rotation ko orbit se zyada waqt lagta hai!','Tumhara brain pain ko process karta hai, lekin khud pain feel nahi karta! Isi liye brain surgery kuch situations mein patient ke awake hone par bhi ki ja sakti hai.']
-
-hook = "क्या आप जानते हो? "
-if not facts[0].startswith("क्या आप जानते हो") and not facts[0].startswith("देखो"):
-    facts[0] = hook + facts[0]
-
+    if d and isinstance(d.get('facts'),list): facts=[str(f).strip() for f in d['facts'] if str(f).strip()]
+# Retry rather than silently publishing unrelated, hard-coded facts.
+if len(facts) < max(3, min(NF, 3)):
+    print('Story generation failed or returned too few segments; stopping to avoid publishing filler.')
+    raise SystemExit(1)
 facts=facts[:NF]
-for i,f in enumerate(facts):print('Fact '+str(i+1)+': '+f)
-
+if len(facts) < 3:
+    print('At least 3 connected segments are required; stopping.')
+    raise SystemExit(1)
+for i,f in enumerate(facts): print('Story segment '+str(i+1)+': '+f)
 save_used_facts(topic_name, facts)
+
+print('STEP 1B: Plan a visual query for each story segment')
+vp_prompt = 'For each Hindi story segment below, write a short English Pixabay VIDEO search query describing exactly what should be visible on screen. Use concrete visual nouns, avoid abstract words and generic terms. Do not invent a different subject. Return JSON only as {"queries":["query 1", ...]} in the same order.\n'
+vp_prompt += '\n'.join(str(i+1)+'. '+f for i,f in enumerate(facts))
+vr=gq(vp_prompt,700,0.2,True)
+visual_queries=[]
+if vr:
+    vd=pj(vr)
+    if vd and isinstance(vd.get('queries'),list): visual_queries=[str(q).strip() for q in vd['queries']]
+if len(visual_queries) != len(facts):
+    print('Visual planner returned the wrong number of queries; stopping rather than using random footage.')
+    raise SystemExit(1)
+print('Visual queries: '+str(visual_queries))
 
 print('STEP 2: Voiceover with word timing')
 vp='voice.mp3'
@@ -354,32 +347,30 @@ if not word_times:
 
 print('Audio: '+str(round(atd,1))+'s, words captured: '+str(len(word_times)))
 
-print('STEP 3: Download stock videos')
-urls=get_vids(kw,NF)
-print('Got '+str(len(urls))+' videos')
-
-print('STEP 4: Create clips')
+print('STEP 3: Download scene-matched stock videos')
+print('STEP 4: Create clips (one relevant visual per story segment)')
 clips=[]
-per_clip = atd / NF
-for i,u in enumerate(urls):
-    dur = per_clip
-    cp = 'cc_'+str(i)+'.mp4'
-    success = False
-    p='c_'+str(i)+'.mp4'
-    if dwn(u,p):
-        if clip(p,cp,dur):
-            success = True
-        try:os.remove(p)
-        except:pass
-    
-    if not success:
-        subprocess.run(['ffmpeg','-y','-f','lavfi','-i','color=c=black:s=720x1280:r=30','-t',str(dur),'-c:v','libx264','-preset','fast','-crf','23','-pix_fmt','yuv420p','-an',cp],capture_output=True)
+per_clip = atd / len(facts)
+for i,query in enumerate(visual_queries):
+    urls=get_vids(query,1)
+    if not urls:
+        print('No matching stock clip found for segment '+str(i+1)+' ('+query+'). Stopping; no black-screen fallback.')
+        raise SystemExit(1)
+    cp='cc_'+str(i)+'.mp4'
+    src='c_'+str(i)+'.mp4'
+    if not dwn(urls[0],src):
+        print('Could not download scene '+str(i+1)+'. Stopping rather than using unrelated visuals.')
+        raise SystemExit(1)
+    if not clip(src,cp,per_clip):
+        # Retry with a duration no longer than the downloaded clip.
+        source_duration=probe(src)
+        if source_duration < 1.2 or not clip(src,cp,min(per_clip,source_duration-0.2)):
+            print('Could not create valid clip for segment '+str(i+1)+'.')
+            raise SystemExit(1)
+    try: os.remove(src)
+    except OSError: pass
     clips.append(cp)
-    if len(clips)>=NF:break
-print('Clips: '+str(len(clips)))
-
-if len(clips)<2:
-    print('Not enough clips');exit(1)
+print('Clips: '+str(len(clips))+' / story segments: '+str(len(facts)))
 
 print('STEP 5: Concat + captions')
 open('l.txt','w').write('\n'.join("file '"+os.path.abspath(c)+"'" for c in clips))
@@ -395,8 +386,8 @@ for c in clips:
     except:pass
 try:os.remove('l.txt');os.remove('raw.mp4');os.remove(ap)
 except:pass
-if not os.path.exists(op):
-    print('Render failed');exit(1)
+if not os.path.exists(op) or os.path.getsize(op) < 50000 or probe(op) < 3:
+    print('Render failed or output is suspiciously small/short; not sending to Telegram.'); exit(1)
 print('Video: '+op)
 print('STEP 7: Metadata')
 FACTS_TAGS = {
