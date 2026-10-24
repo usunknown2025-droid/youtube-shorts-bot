@@ -9,6 +9,7 @@ TITLE = os.environ['TITLE']
 DESCRIPTION = os.environ.get('DESCRIPTION', '')
 TAGS_STR = os.environ.get('TAGS', '')
 TAGS = [t.strip() for t in TAGS_STR.split(',') if t.strip()]
+SCHEDULE_TIME = os.environ.get('SCHEDULE_TIME', '').strip()
 
 YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '').strip()
 YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '').strip()
@@ -58,18 +59,26 @@ def upload_to_youtube(video_path, title, description, tags):
     url = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status'
     headers = {'Authorization': 'Bearer ' + access_token}
 
+    status_body = {
+        'privacyStatus': 'public',
+        'selfDeclaredMadeForKids': False,
+        'containsSyntheticMedia': False
+    }
+
+    # 🚨 AGAR TIME DIYA HAI TOH VIDEO KO SCHEDULE KARO
+    if SCHEDULE_TIME:
+        status_body['privacyStatus'] = 'private'
+        status_body['publishAt'] = SCHEDULE_TIME
+        print('Video scheduled for: ' + SCHEDULE_TIME)
+
     metadata = {
         'snippet': {
             'title': title[:100],
             'description': description[:5000],
             'tags': tags[:15],
-            'categoryId': '24' # Entertainment
+            'categoryId': '24' 
         },
-        'status': {
-            'privacyStatus': 'public',
-            'selfDeclaredMadeForKids': False,
-            'containsSyntheticMedia': False # AI content flag (as we discussed)
-        }
+        'status': status_body
     }
 
     with open(video_path, 'rb') as f:
@@ -99,8 +108,12 @@ yt_id = upload_to_youtube(video_path, TITLE, DESCRIPTION, TAGS)
 
 if yt_id:
     link = 'https://youtu.be/' + yt_id
-    print('Upload Success: ' + link)
-    send_message('✅ YouTube par upload ho gaya!\n\nTitle: ' + TITLE + '\nLink: ' + link)
+    if SCHEDULE_TIME:
+        print('Upload Success (Scheduled): ' + link)
+        send_message('✅ Video YouTube par Schedule ho gayi!\n\nTitle: ' + TITLE + '\nTime: ' + SCHEDULE_TIME + '\nLink: ' + link)
+    else:
+        print('Upload Success (Public): ' + link)
+        send_message('✅ YouTube par upload ho gaya!\n\nTitle: ' + TITLE + '\nLink: ' + link)
 else:
     send_message('❌ YouTube upload fail ho gaya. GitHub logs check karo.')
 
