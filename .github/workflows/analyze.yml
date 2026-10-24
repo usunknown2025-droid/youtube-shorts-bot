@@ -1,0 +1,25 @@
+name: Channel Growth Analysis
+
+on:
+  schedule:
+    - cron: '30 15 * * *' # Ye roz raat 9:00 PM IST (3:30 PM UTC) par chalega
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run Analysis Script
+        run: python3 analyze.py
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: '8641951707'
+          YT_CHANNEL_ID: 'UC_X6OQ3DKcsbYNE6H8uQQuVA' # Tumhara Channel ID
+          YT_API_KEY: ${{ secrets.YT_API_KEY }}
