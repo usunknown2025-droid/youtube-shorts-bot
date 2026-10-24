@@ -20,6 +20,10 @@ on:
         required: false
         default: ''
         type: string
+      schedule_time:
+        required: false
+        default: ''
+        type: string
 
 jobs:
   upload:
@@ -42,6 +46,7 @@ jobs:
           TITLE: ${{ github.event.inputs.title }}
           DESCRIPTION: ${{ github.event.inputs.description }}
           TAGS: ${{ github.event.inputs.tags }}
+          SCHEDULE_TIME: ${{ github.event.inputs.schedule_time }}
           YT_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
