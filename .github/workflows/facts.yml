@@ -43,7 +43,6 @@ jobs:
           CUSTOM_CATEGORY: ${{ github.event.inputs.custom_category }}
           NUM_FACTS: ${{ github.event.inputs.num_facts }}
           VOICE_NAME: ${{ github.event.inputs.voice_name }}
-          VOICE_NAME: ${{ github.event.inputs.voice_name }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
