@@ -1,0 +1,107 @@
+name: YouTube Video Download
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'YouTube Video URL'
+        required: true
+        type: string
+      chat_id:
+        description: 'Telegram Chat ID'
+        required: true
+        type: string
+      duration:
+        description: 'Duration in seconds'
+        required: true
+        default: '45'
+        type: string
+      voice_name:
+        description: 'Voice Name'
+        required: true
+        default: 'en-US-DavisNeural'
+        type: string
+      num_shorts:
+        description: 'Number of Shorts (1-5)'
+        required: true
+        default: '3'
+        type: string
+      topic:
+        description: 'Video Topic (optional)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Deno
+        run: |
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg libass9
+
+      - name: Install yt-dlp
+        run: pip install --upgrade --pre yt-dlp
+
+      - name: Install AI dependencies
+        run: pip install faster-whisper requests gtts edge-tts
+
+      - name: Create cookies file
+        run: echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
+
+      - name: Download Video
+        run: |
+          yt-dlp --js-runtimes deno \
+            --remote-components ejs:github \
+            --cookies cookies.txt \
+            -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
+            --merge-output-format mp4 \
+            -o "video.mp4" \
+            "${{ github.event.inputs.video_url }}"
+
+      - name: Extract Audio
+        run: ffmpeg -i video.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 audio.wav
+
+      - name: Process and Generate Shorts
+        run: python3 process.py
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          VOICE_NAME: ${{ github.event.inputs.voice_name }}
+          CHAT_ID: ${{ github.event.inputs.chat_id }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          DURATION: ${{ github.event.inputs.duration }}
+          NUM_SHORTS: ${{ github.event.inputs.num_shorts }}
+          TOPIC: ${{ github.event.inputs.topic }}
+          YT_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiple-shorts
+          path: |
+            video.mp4
+            short_*.mp4
+          retention-days: 1
