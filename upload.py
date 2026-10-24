@@ -62,7 +62,7 @@ def upload_to_youtube(video_path, title, description, tags):
     status_body = {
         'privacyStatus': 'public',
         'selfDeclaredMadeForKids': False,
-        'containsSyntheticMedia': False
+        'containsSyntheticMedia': True 
     }
 
     # 🚨 AGAR TIME DIYA HAI TOH VIDEO KO SCHEDULE KARO
