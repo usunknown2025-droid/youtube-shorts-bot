@@ -10,7 +10,7 @@ TITLE = os.environ['TITLE']
 DESCRIPTION = os.environ.get('DESCRIPTION', '')
 TAGS_STR = os.environ.get('TAGS', '')
 TAGS = [t.strip() for t in TAGS_STR.split(',') if t.strip()]
-SCHEDULE_TIME = os.environ.get('SCHEDULE_TIME', '').strip() # Ye 7:15 AM ka time hoga
+SCHEDULE_TIME = os.environ.get('SCHEDULE_TIME', '').strip() 
 
 YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '').strip()
 YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '').strip()
@@ -61,19 +61,20 @@ def upload_to_youtube(video_path, title, description, tags):
     headers = {'Authorization': 'Bearer ' + access_token}
 
     status_body = {
-        'privacyStatus': 'unlisted', # Pehle unlisted rahega taaki aap edit kar sako
+        'privacyStatus': 'unlisted', 
         'selfDeclaredMadeForKids': False,
         'containsSyntheticMedia': True
     }
 
-    # 🚨 5 MINUTE DELAY LOGIC
     if SCHEDULE_TIME:
         try:
-            # SCHEDULE_TIME format: 2026-10-25T07:15:00Z (UTC format n8n se aayega)
-            # Hum isme 5 minute add karenge
-            dt = datetime.strptime(SCHEDULE_TIME, "%Y-%m-%dT%H:%M:%SZ")
+            # 🚨 FIX: Time parsing handles milliseconds (.000Z)
+            clean_time = SCHEDULE_TIME.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(clean_time)
             publish_time = dt + timedelta(minutes=5)
-            publish_at_str = publish_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            # YouTube API format: YYYY-MM-DDThh:mm:ss.sZ
+            publish_at_str = publish_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
             
             status_body['publishAt'] = publish_at_str
             print(f'Video will be published at: {publish_at_str}')
@@ -110,7 +111,7 @@ if not download_from_telegram(FILE_ID, video_path):
     send_message('❌ Video download fail ho gaya.')
     exit(1)
 
-send_message('⏳ Video YouTube par upload ho rahi hai (Unlisted)...')
+send_message('⏳ Video YouTube par upload ho rahi hai...')
 yt_id = upload_to_youtube(video_path, TITLE, DESCRIPTION, TAGS)
 
 if yt_id:
