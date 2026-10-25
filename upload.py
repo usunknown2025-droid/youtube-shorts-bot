@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+from datetime import datetime, timedelta
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
@@ -9,7 +10,7 @@ TITLE = os.environ['TITLE']
 DESCRIPTION = os.environ.get('DESCRIPTION', '')
 TAGS_STR = os.environ.get('TAGS', '')
 TAGS = [t.strip() for t in TAGS_STR.split(',') if t.strip()]
-SCHEDULE_TIME = os.environ.get('SCHEDULE_TIME', '').strip()
+SCHEDULE_TIME = os.environ.get('SCHEDULE_TIME', '').strip() # Ye 7:15 AM ka time hoga
 
 YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '').strip()
 YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '').strip()
@@ -60,15 +61,24 @@ def upload_to_youtube(video_path, title, description, tags):
     headers = {'Authorization': 'Bearer ' + access_token}
 
     status_body = {
-        'privacyStatus': 'public',
+        'privacyStatus': 'unlisted', # Pehle unlisted rahega taaki aap edit kar sako
         'selfDeclaredMadeForKids': False,
         'containsSyntheticMedia': True
     }
 
+    # 🚨 5 MINUTE DELAY LOGIC
     if SCHEDULE_TIME:
-        status_body['privacyStatus'] = 'private'
-        status_body['publishAt'] = SCHEDULE_TIME
-        print('Video scheduled for: ' + SCHEDULE_TIME)
+        try:
+            # SCHEDULE_TIME format: 2026-10-25T07:15:00Z (UTC format n8n se aayega)
+            # Hum isme 5 minute add karenge
+            dt = datetime.strptime(SCHEDULE_TIME, "%Y-%m-%dT%H:%M:%SZ")
+            publish_time = dt + timedelta(minutes=5)
+            publish_at_str = publish_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            
+            status_body['publishAt'] = publish_at_str
+            print(f'Video will be published at: {publish_at_str}')
+        except Exception as e:
+            print(f'Time parsing error: {e}. Video will remain unlisted.')
 
     metadata = {
         'snippet': {
@@ -100,19 +110,13 @@ if not download_from_telegram(FILE_ID, video_path):
     send_message('❌ Video download fail ho gaya.')
     exit(1)
 
-print('Video Downloaded. Size: ' + str(os.path.getsize(video_path)) + ' bytes')
-
-send_message('⏳ Video YouTube par upload ho rahi hai...')
+send_message('⏳ Video YouTube par upload ho rahi hai (Unlisted)...')
 yt_id = upload_to_youtube(video_path, TITLE, DESCRIPTION, TAGS)
 
 if yt_id:
     link = 'https://youtu.be/' + yt_id
-    if SCHEDULE_TIME:
-        print('Upload Success (Scheduled): ' + link)
-        send_message('✅ Video YouTube par Schedule ho gayi!\n\nTitle: ' + TITLE + '\nTime: ' + SCHEDULE_TIME + '\nLink: ' + link)
-    else:
-        print('Upload Success (Public): ' + link)
-        send_message('✅ YouTube par upload ho gaya!\n\nTitle: ' + TITLE + '\nLink: ' + link)
+    print('Upload Success: ' + link)
+    send_message(f'✅ Video YouTube par upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ye abhi Unlisted hai. YouTube Studio se edit karlo, 5 minute baad ye apne aap Public ho jayegi!')
 else:
     send_message('❌ YouTube upload fail ho gaya. GitHub logs check karo.')
 
