@@ -61,9 +61,9 @@ def upload_to_youtube(video_path, title, description, tags):
     headers = {'Authorization': 'Bearer ' + access_token}
 
     status_body = {
-        'privacyStatus': 'unlisted', 
-        'selfDeclaredMadeForKids': False,
-        'containsSyntheticMedia': True
+    'privacyStatus': 'private', # 🚨 FIX: Schedule karne ke liye private hona zaroori hai
+    'selfDeclaredMadeForKids': False,
+    'containsSyntheticMedia': True
     }
 
     if SCHEDULE_TIME:
