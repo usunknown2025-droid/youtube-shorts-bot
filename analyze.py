@@ -82,43 +82,22 @@ def analyze_with_ai(video_data):
     
     # 🚨 NAYA PROMPT: No Tables, Clean Format
     prompt = f"""
-    You are an expert YouTube Shorts Growth Strategist for a 'Miniature Repair' channel.
-    Here is the data of the last 10 Shorts uploaded on the channel:
-    
-    {chr(10).join(video_data)}
-    
-    Please analyze this data and give a highly practical, actionable report in Hinglish (Hindi + English).
-    
-    CRITICAL RULES FOR FORMATTING:
-    1. DO NOT USE MARKDOWN TABLES (No |---|---|).
-    2. Use Telegram-supported Markdown only (Bold with *text*, and bullet points with -).
-    3. Keep it extremely clean, visually appealing, and mobile-friendly.
-    4. Use emojis to separate sections.
-    
-    Follow exactly this structure:
-    
-    📊 *1. Channel Performance (Abhi tak ka Result)*
-    - Write 2-3 bullet points summarizing how the channel is doing. Which video did best and why?
-    
-    ⚠️ *2. Kya Galti Ho Rahi Hai? (Weaknesses)*
-    - Bullet point 1 (Issue with Title/Thumbnail)
-    - Bullet point 2 (Issue with Content/Hook)
-    - Bullet point 3 (Issue with SEO/Tags)
-    
-    🚀 *3. Viral Hone Ka Action Plan (Fixes)*
-    - Bullet point 1 (What to change immediately)
-    - Bullet point 2 (Tricks to get more views)
-    - Bullet point 3 (Trending audio/visuals strategy)
-    
-    💡 *4. Next 5 Video Topics (High Viral Potential)*
-    1. *[Topic Name]* - [1 line reason why it will work]
-    2. *[Topic Name]* - [1 line reason]
-    3. *[Topic Name]* - [1 line reason]
-    4. *[Topic Name]* - [1 line reason]
-    5. *[Topic Name]* - [1 line reason]
-    
-    End the report with a short, motivating one-liner.
-    """
+You are an expert YouTube Shorts Growth Strategist. Look at the data of the last 10 Shorts:
+
+{chr(10).join(video_data)}
+
+IMPORTANT: Do NOT repeat the same boring report every day. Write a fresh, highly actionable analysis in Hinglish.
+Read the data carefully. If views are low, tell me a NEW trick. If a video did well, tell me how to double down on it.
+
+Format the response in these 4 sections:
+
+1. 📊 **Aaj Ka Reality Check:** (1-2 lines on current performance based on the numbers)
+2. 🔍 **Naya Experiment (Jo aaj try karna hai):** (Give 1 specific, unique thing to try today. e.g., "Aaj ki video mein pehle 1 second ke liye screen flash karo")
+3. 🎨 **Thumbnail/Title Ka Naya Style:** (Give 1 fresh idea for a title or thumbnail based on the data)
+4. 💡 **Next 5 Topics:** (Suggest 5 next topics. Try to give topics that we haven't done yet, but are related to our niche)
+
+Keep it highly motivational, straight-forward, and use emojis. Sound like a human coach.
+"""
     
     data = {
         "model": "openai/gpt-oss-120b",
