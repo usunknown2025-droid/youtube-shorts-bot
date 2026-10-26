@@ -24,6 +24,10 @@ on:
         required: false
         default: ''
         type: string
+      channel:
+        required: true
+        default: '1'
+        type: string
 
 jobs:
   upload:
@@ -47,6 +51,12 @@ jobs:
           DESCRIPTION: ${{ github.event.inputs.description }}
           TAGS: ${{ github.event.inputs.tags }}
           SCHEDULE_TIME: ${{ github.event.inputs.schedule_time }}
+          CHANNEL: ${{ github.event.inputs.channel }}
+          # Channel 1 tokens
           YT_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          # Channel 2 tokens
+          YT_CLIENT_ID_2: ${{ secrets.YT_CLIENT_ID_2 }}
+          YT_CLIENT_SECRET_2: ${{ secrets.YT_CLIENT_SECRET_2 }}
+          YT_REFRESH_TOKEN_2: ${{ secrets.YT_REFRESH_TOKEN_2 }}
