@@ -2,7 +2,7 @@ name: Milestone Checker
 
 on:
   schedule:
-    - cron: '0 */1 * * *' # Ye har 1 ghante mein check karega
+    - cron: '0 */5 * * *' # Ye har 5 ghante mein check karega
   workflow_dispatch:
 
 jobs:
