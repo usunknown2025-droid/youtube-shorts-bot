@@ -1,0 +1,26 @@
+name: Milestone Checker
+
+on:
+  schedule:
+    - cron: '0 */1 * * *' # Ye har 1 ghante mein check karega
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run Milestone Script
+        run: python3 milestone.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: '8641951707'
+          YT_CHANNEL_ID: ${{ secrets.YT_CHANNEL_ID }}
+          YT_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
