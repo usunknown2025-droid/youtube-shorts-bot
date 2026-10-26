@@ -61,25 +61,21 @@ def upload_to_youtube(video_path, title, description, tags):
     headers = {'Authorization': 'Bearer ' + access_token}
 
     status_body = {
-    'privacyStatus': 'private', # 🚨 FIX: Schedule karne ke liye private hona zaroori hai
-    'selfDeclaredMadeForKids': False,
-    'containsSyntheticMedia': True
+        'privacyStatus': 'private', # 🚨 Schedule ke liye private zaroori hai
+        'selfDeclaredMadeForKids': False,
+        'containsSyntheticMedia': True
     }
 
     if SCHEDULE_TIME:
         try:
-            # 🚨 FIX: Time parsing handles milliseconds (.000Z)
             clean_time = SCHEDULE_TIME.replace('Z', '+00:00')
             dt = datetime.fromisoformat(clean_time)
             publish_time = dt + timedelta(minutes=5)
-            
-            # YouTube API format: YYYY-MM-DDThh:mm:ss.sZ
             publish_at_str = publish_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-            
             status_body['publishAt'] = publish_at_str
             print(f'Video will be published at: {publish_at_str}')
         except Exception as e:
-            print(f'Time parsing error: {e}. Video will remain unlisted.')
+            print(f'Time parsing error: {e}.')
 
     metadata = {
         'snippet': {
@@ -117,7 +113,7 @@ yt_id = upload_to_youtube(video_path, TITLE, DESCRIPTION, TAGS)
 if yt_id:
     link = 'https://youtu.be/' + yt_id
     print('Upload Success: ' + link)
-    send_message(f'✅ Video YouTube par upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ye abhi Unlisted hai. YouTube Studio se edit karlo, 5 minute baad ye apne aap Public ho jayegi!')
+    send_message(f'✅ Video YouTube par upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ye abhi Private hai. YouTube Studio se edit karlo, 5 minute baad ye apne aap Public ho jayegi!')
 else:
     send_message('❌ YouTube upload fail ho gaya. GitHub logs check karo.')
 
