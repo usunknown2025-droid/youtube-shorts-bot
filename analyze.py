@@ -15,23 +15,26 @@ YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN', '')
 
 def send_telegram_message(text):
     if not BOT_TOKEN or not CHAT_ID:
-        print("Telegram credentials missing, skipping message.")
+        print("❌ Telegram credentials missing, skipping message.")
         return
-    # Telegram limit is 4096, we split if needed
+    print(f"📤 Sending message to Telegram (Length: {len(text)})...")
+    
     max_len = 4000
     if len(text) > max_len:
         for i in range(0, len(text), max_len):
-            requests.post(
+            res = requests.post(
                 f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
                 data={'chat_id': CHAT_ID, 'text': text[i:i+max_len], 'parse_mode': 'Markdown'},
                 timeout=30
             )
+            print(f"Telegram Response: {res.status_code} - {res.text[:100]}")
     else:
-        requests.post(
+        res = requests.post(
             f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
             data={'chat_id': CHAT_ID, 'text': text, 'parse_mode': 'Markdown'},
             timeout=30
         )
+        print(f"Telegram Response: {res.status_code} - {res.text[:100]}")
 
 def get_access_token():
     url = 'https://oauth2.googleapis.com/token'
@@ -41,27 +44,38 @@ def get_access_token():
         'refresh_token': YT_REFRESH_TOKEN,
         'grant_type': 'refresh_token'
     }
+    print("🔑 Fetching YouTube Access Token...")
     r = requests.post(url, data=data, timeout=30)
-    return r.json().get('access_token')
+    res = r.json()
+    if 'access_token' in res:
+        print("✅ Access Token received.")
+        return res['access_token']
+    else:
+        print(f"❌ Token Error: {res}")
+        return None
 
 def get_channel_videos(access_token):
     url = f'https://www.googleapis.com/youtube/v3/search?channelId={CHANNEL_ID}&part=snippet,id&order=date&maxResults=10&type=video'
     headers = {'Authorization': f'Bearer {access_token}'}
+    print("📺 Fetching recent videos from YouTube...")
     r = requests.get(url, headers=headers, timeout=30)
     data = r.json()
     if 'items' not in data:
-        print("❌ Error fetching videos:", data)
+        print(f"❌ Error fetching videos: {data}")
         return []
+    print(f"✅ Found {len(data['items'])} videos.")
     return data['items']
 
 def get_video_stats(video_ids, access_token):
     ids_str = ','.join(video_ids)
     url = f'https://www.googleapis.com/youtube/v3/videos?id={ids_str}&part=statistics,snippet'
     headers = {'Authorization': f'Bearer {access_token}'}
+    print("📊 Fetching stats for these videos...")
     r = requests.get(url, headers=headers, timeout=30)
     data = r.json()
     
     if 'items' not in data:
+        print(f"❌ Error fetching stats: {data}")
         return []
         
     stats = []
@@ -71,33 +85,37 @@ def get_video_stats(video_ids, access_token):
         likes = item['statistics'].get('likeCount', '0')
         comments = item['statistics'].get('commentCount', '0')
         stats.append(f"Video: {title} | Views: {views} | Likes: {likes} | Comments: {comments}")
+    print(f"✅ Stats fetched for {len(stats)} videos.")
     return stats
 
 def analyze_with_ai(video_data):
+    if not GROQ_API_KEY:
+        print("❌ Missing GROQ_API_KEY")
+        return "AI analysis skipped."
+        
     url = 'https://api.groq.com/openai/v1/chat/completions'
     headers = {
         'Authorization': f'Bearer {GROQ_API_KEY}',
         'Content-Type': 'application/json'
     }
     
-    # 🚨 NAYA PROMPT: No Tables, Clean Format
     prompt = f"""
-You are an expert YouTube Shorts Growth Strategist. Look at the data of the last 10 Shorts:
-
-{chr(10).join(video_data)}
-
-IMPORTANT: Do NOT repeat the same boring report every day. Write a fresh, highly actionable analysis in Hinglish.
-Read the data carefully. If views are low, tell me a NEW trick. If a video did well, tell me how to double down on it.
-
-Format the response in these 4 sections:
-
-1. 📊 **Aaj Ka Reality Check:** (1-2 lines on current performance based on the numbers)
-2. 🔍 **Naya Experiment (Jo aaj try karna hai):** (Give 1 specific, unique thing to try today. e.g., "Aaj ki video mein pehle 1 second ke liye screen flash karo")
-3. 🎨 **Thumbnail/Title Ka Naya Style:** (Give 1 fresh idea for a title or thumbnail based on the data)
-4. 💡 **Next 5 Topics:** (Suggest 5 next topics. Try to give topics that we haven't done yet, but are related to our niche)
-
-Keep it highly motivational, straight-forward, and use emojis. Sound like a human coach.
-"""
+    You are an expert YouTube Shorts Growth Strategist. Look at the data of the last 10 Shorts:
+    
+    {chr(10).join(video_data)}
+    
+    IMPORTANT: Do NOT repeat the same boring report every day. Write a fresh, highly actionable analysis in Hinglish.
+    Read the data carefully. If views are low, tell me a NEW trick. If a video did well, tell me how to double down on it.
+    
+    Format the response in these 4 sections:
+    
+    1. 📊 **Aaj Ka Reality Check:** (1-2 lines on current performance based on the numbers)
+    2. 🔍 **Naya Experiment (Jo aaj try karna hai):** (Give 1 specific, unique thing to try today.)
+    3. 🎨 **Thumbnail/Title Ka Naya Style:** (Give 1 fresh idea for a title or thumbnail)
+    4. 💡 **Next 5 Topics:** (Suggest 5 next topics.)
+    
+    Keep it highly motivational, straight-forward, and use emojis. Sound like a human coach.
+    """
     
     data = {
         "model": "openai/gpt-oss-120b",
@@ -105,20 +123,23 @@ Keep it highly motivational, straight-forward, and use emojis. Sound like a huma
         "temperature": 0.7
     }
     
+    print("🧠 Sending data to Groq AI for analysis...")
     r = requests.post(url, headers=headers, json=data, timeout=60)
     result = r.json()
     
     if 'choices' in result:
+        print("✅ AI analysis successful.")
         return result['choices'][0]['message']['content']
     else:
-        print("❌ Groq Error:", result)
+        print(f"❌ Groq Error: {result}")
         return "❌ AI analysis fail ho gaya."
 
 def main():
     print("=== Starting Analysis ===")
+    
     access_token = get_access_token()
     if not access_token:
-        send_telegram_message("❌ YouTube Token fail ho gaya.")
+        send_telegram_message("❌ YouTube Token fail ho gaya. GitHub logs check karo.")
         return
 
     videos = get_channel_videos(access_token)
@@ -127,16 +148,19 @@ def main():
         return
         
     video_ids = [v['id']['videoId'] for v in videos]
+    
     video_stats = get_video_stats(video_ids, access_token)
     if not video_stats:
         send_telegram_message("❌ Video statistics fetch nahi ho payi.")
         return
         
     send_telegram_message("🧠 AI tumhare channel ka analysis kar raha hai, please wait 10-20 seconds...")
+    
     report = analyze_with_ai(video_stats)
     
-    final_message = f"📈 *CHANNEL ANALYSIS REPORT* 📈\n\n{report}"
+    final_message = f"📈 **CHANNEL ANALYSIS REPORT** 📈\n\n{report}"
     send_telegram_message(final_message)
+    
     print("=== Analysis Complete ===")
 
 if __name__ == "__main__":
