@@ -2,6 +2,7 @@ import os
 import requests
 import json
 import sys
+import re
 
 # Environment Variables
 GROQ_API_KEY = os.environ.get('GROQ_API_KEY', '')
@@ -13,133 +14,137 @@ YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '')
 YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '')
 YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN', '')
 
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '').rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', '')
+
+def get_used_topics():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    try:
+        r = requests.get(
+            SUPABASE_URL + '/rest/v1/suggested_topics',
+            headers={'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY},
+            params={'select': 'topic', 'order': 'created_at.desc', 'limit': '30'},
+            timeout=30
+        ).json()
+        if isinstance(r, list):
+            return [item.get('topic', '') for item in r if item.get('topic')]
+    except Exception as e:
+        print("Supabase fetch error:", e)
+    return []
+
+def save_topics(topics):
+    if not SUPABASE_URL or not SUPABASE_KEY or not topics:
+        return
+    rows = [{'topic': t} for t in topics]
+    try:
+        requests.post(
+            SUPABASE_URL + '/rest/v1/suggested_topics',
+            headers={'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json'},
+            json=rows,
+            timeout=30
+        )
+        print(f"Saved {len(topics)} new topics to history.")
+    except Exception as e:
+        print("Supabase save error:", e)
+
+def extract_topics(report):
+    topics = []
+    in_section = False
+    for line in report.split('\n'):
+        if 'Next 5 Topics' in line:
+            in_section = True
+            continue
+        if in_section:
+            line = line.strip()
+            if line.startswith('- '):
+                topics.append(line[2:].strip())
+            elif re.match(r'^\d+\.', line):
+                topics.append(re.sub(r'^\d+\.\s*', '', line).strip())
+            if len(topics) == 5:
+                break
+    return topics
+
 def send_telegram_message(text):
     if not BOT_TOKEN or not CHAT_ID:
-        print("❌ Telegram credentials missing, skipping message.")
+        print("❌ Telegram credentials missing.")
         return
-    print(f"📤 Sending message to Telegram (Length: {len(text)})...")
-    
+    print("📤 Sending message to Telegram...")
     max_len = 4000
     if len(text) > max_len:
         for i in range(0, len(text), max_len):
-            res = requests.post(
-                f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
-                data={'chat_id': CHAT_ID, 'text': text[i:i+max_len], 'parse_mode': 'Markdown'},
-                timeout=30
-            )
-            print(f"Telegram Response: {res.status_code} - {res.text[:100]}")
+            requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage', data={'chat_id': CHAT_ID, 'text': text[i:i+max_len], 'parse_mode': 'Markdown'}, timeout=30)
     else:
-        res = requests.post(
-            f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage',
-            data={'chat_id': CHAT_ID, 'text': text, 'parse_mode': 'Markdown'},
-            timeout=30
-        )
-        print(f"Telegram Response: {res.status_code} - {res.text[:100]}")
+        requests.post(f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage', data={'chat_id': CHAT_ID, 'text': text, 'parse_mode': 'Markdown'}, timeout=30)
 
 def get_access_token():
     url = 'https://oauth2.googleapis.com/token'
-    data = {
-        'client_id': YT_CLIENT_ID,
-        'client_secret': YT_CLIENT_SECRET,
-        'refresh_token': YT_REFRESH_TOKEN,
-        'grant_type': 'refresh_token'
-    }
-    print("🔑 Fetching YouTube Access Token...")
+    data = {'client_id': YT_CLIENT_ID, 'client_secret': YT_CLIENT_SECRET, 'refresh_token': YT_REFRESH_TOKEN, 'grant_type': 'refresh_token'}
     r = requests.post(url, data=data, timeout=30)
-    res = r.json()
-    if 'access_token' in res:
-        print("✅ Access Token received.")
-        return res['access_token']
-    else:
-        print(f"❌ Token Error: {res}")
-        return None
+    return r.json().get('access_token')
 
 def get_channel_videos(access_token):
     url = f'https://www.googleapis.com/youtube/v3/search?channelId={CHANNEL_ID}&part=snippet,id&order=date&maxResults=10&type=video'
-    headers = {'Authorization': f'Bearer {access_token}'}
-    print("📺 Fetching recent videos from YouTube...")
-    r = requests.get(url, headers=headers, timeout=30)
+    r = requests.get(url, headers={'Authorization': f'Bearer {access_token}'}, timeout=30)
     data = r.json()
-    if 'items' not in data:
-        print(f"❌ Error fetching videos: {data}")
-        return []
-    print(f"✅ Found {len(data['items'])} videos.")
-    return data['items']
+    return data.get('items', [])
 
 def get_video_stats(video_ids, access_token):
     ids_str = ','.join(video_ids)
     url = f'https://www.googleapis.com/youtube/v3/videos?id={ids_str}&part=statistics,snippet'
-    headers = {'Authorization': f'Bearer {access_token}'}
-    print("📊 Fetching stats for these videos...")
-    r = requests.get(url, headers=headers, timeout=30)
+    r = requests.get(url, headers={'Authorization': f'Bearer {access_token}'}, timeout=30)
     data = r.json()
-    
-    if 'items' not in data:
-        print(f"❌ Error fetching stats: {data}")
-        return []
-        
     stats = []
-    for item in data['items']:
-        title = item['snippet']['title']
-        views = item['statistics'].get('viewCount', '0')
-        likes = item['statistics'].get('likeCount', '0')
-        comments = item['statistics'].get('commentCount', '0')
-        stats.append(f"Video: {title} | Views: {views} | Likes: {likes} | Comments: {comments}")
-    print(f"✅ Stats fetched for {len(stats)} videos.")
+    if 'items' in data:
+        for item in data['items']:
+            title = item['snippet']['title']
+            views = item['statistics'].get('viewCount', '0')
+            likes = item['statistics'].get('likeCount', '0')
+            comments = item['statistics'].get('commentCount', '0')
+            stats.append(f"Video: {title} | Views: {views} | Likes: {likes} | Comments: {comments}")
     return stats
 
-def analyze_with_ai(video_data):
-    if not GROQ_API_KEY:
-        print("❌ Missing GROQ_API_KEY")
-        return "AI analysis skipped."
-        
+def analyze_with_ai(video_data, used_topics):
+    if not GROQ_API_KEY: return "AI analysis skipped."
     url = 'https://api.groq.com/openai/v1/chat/completions'
-    headers = {
-        'Authorization': f'Bearer {GROQ_API_KEY}',
-        'Content-Type': 'application/json'
-    }
+    headers = {'Authorization': f'Bearer {GROQ_API_KEY}', 'Content-Type': 'application/json'}
+    
+    # 🚨 Naya Prompt: Puraane topics pass kar rahe hain
+    used_list = "\n".join(used_topics) if used_topics else "None"
     
     prompt = f"""
     You are an expert YouTube Shorts Growth Strategist. Look at the data of the last 10 Shorts:
     
     {chr(10).join(video_data)}
     
-    IMPORTANT: Do NOT repeat the same boring report every day. Write a fresh, highly actionable analysis in Hinglish.
-    Read the data carefully. If views are low, tell me a NEW trick. If a video did well, tell me how to double down on it.
+    IMPORTANT: Do NOT repeat the same boring report. Write a fresh, highly actionable analysis in Hinglish.
+    
+    Here are the topics we have ALREADY COVERED or SUGGESTED in the past. DO NOT REPEAT THESE TOPICS:
+    {used_list}
     
     Format the response in these 4 sections:
     
     1. 📊 **Aaj Ka Reality Check:** (1-2 lines on current performance based on the numbers)
-    2. 🔍 **Naya Experiment (Jo aaj try karna hai):** (Give 1 specific, unique thing to try today.)
-    3. 🎨 **Thumbnail/Title Ka Naya Style:** (Give 1 fresh idea for a title or thumbnail)
-    4. 💡 **Next 5 Topics:** (Suggest 5 next topics.)
+    2. 🔍 **Naya Experiment:** (Give 1 specific, unique thing to try today.)
+    3. 🎨 **Thumbnail/Title Ka Naya Style:** (Give 1 fresh idea)
+    4. 💡 **Next 5 Topics:** (Suggest 5 NEW topics. Put each topic on a new line starting with '- ')
     
-    Keep it highly motivational, straight-forward, and use emojis. Sound like a human coach.
+    Keep it highly motivational and use emojis.
     """
     
-    data = {
-        "model": "openai/gpt-oss-120b",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7
-    }
-    
-    print("🧠 Sending data to Groq AI for analysis...")
+    data = {"model": "openai/gpt-oss-120b", "messages": [{"role": "user", "content": prompt}], "temperature": 0.8}
     r = requests.post(url, headers=headers, json=data, timeout=60)
     result = r.json()
     
     if 'choices' in result:
-        print("✅ AI analysis successful.")
         return result['choices'][0]['message']['content']
-    else:
-        print(f"❌ Groq Error: {result}")
-        return "❌ AI analysis fail ho gaya."
+    return "❌ AI analysis fail ho gaya."
 
 def main():
     print("=== Starting Analysis ===")
-    
     access_token = get_access_token()
     if not access_token:
-        send_telegram_message("❌ YouTube Token fail ho gaya. GitHub logs check karo.")
+        send_telegram_message("❌ YouTube Token fail ho gaya.")
         return
 
     videos = get_channel_videos(access_token)
@@ -147,20 +152,23 @@ def main():
         send_telegram_message("❌ Channel se videos fetch nahi ho payi.")
         return
         
-    video_ids = [v['id']['videoId'] for v in videos]
+    video_stats = get_video_stats([v['id']['videoId'] for v in videos], access_token)
     
-    video_stats = get_video_stats(video_ids, access_token)
-    if not video_stats:
-        send_telegram_message("❌ Video statistics fetch nahi ho payi.")
-        return
-        
-    send_telegram_message("🧠 AI tumhare channel ka analysis kar raha hai, please wait 10-20 seconds...")
+    # 🚨 Supabase se puraane topics laao
+    used_topics = get_used_topics()
+    print(f"Found {len(used_topics)} used topics in DB.")
     
-    report = analyze_with_ai(video_stats)
+    send_telegram_message("🧠 AI tumhare channel ka analysis kar raha hai (with memory)...")
+    
+    report = analyze_with_ai(video_stats, used_topics)
+    
+    # 🚨 Naye topics extract karke save karo
+    new_topics = extract_topics(report)
+    if new_topics:
+        save_topics(new_topics)
     
     final_message = f"📈 **CHANNEL ANALYSIS REPORT** 📈\n\n{report}"
     send_telegram_message(final_message)
-    
     print("=== Analysis Complete ===")
 
 if __name__ == "__main__":
