@@ -3,6 +3,7 @@ import requests
 import json
 from datetime import datetime, timedelta
 import subprocess
+import time
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
@@ -36,7 +37,6 @@ def get_youtube_access_token():
     result = r.json()
     if 'access_token' in result:
         return result['access_token']
-    print('Token error: ' + str(result))
     return None
 
 def download_from_telegram(file_id, path):
@@ -44,7 +44,6 @@ def download_from_telegram(file_id, path):
     r = requests.get(url, params={'file_id': file_id}, timeout=30)
     result = r.json()
     if not result.get('ok'):
-        print('getFile error: ' + str(result))
         return False
     file_path = result['result']['file_path']
     download_url = 'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + file_path
@@ -61,22 +60,12 @@ def upload_to_youtube(video_path, title, description, tags):
     url = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status'
     headers = {'Authorization': 'Bearer ' + access_token}
 
+    # 🚨 Yahan hum video ko PEHLE UNLISTED upload kar rahe hain
     status_body = {
-        'privacyStatus': 'private',
+        'privacyStatus': 'unlisted', 
         'selfDeclaredMadeForKids': False,
         'containsSyntheticMedia': True
     }
-
-    if SCHEDULE_TIME:
-        try:
-            clean_time = SCHEDULE_TIME.replace('Z', '+00:00')
-            dt = datetime.fromisoformat(clean_time)
-            publish_time = dt + timedelta(minutes=5)
-            publish_at_str = publish_time.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-            status_body['publishAt'] = publish_at_str
-            print(f'Video will be published at: {publish_at_str}')
-        except Exception as e:
-            print(f'Time parsing error: {e}.')
 
     metadata = {
         'snippet': {
@@ -100,6 +89,24 @@ def upload_to_youtube(video_path, title, description, tags):
     print('YouTube upload error: ' + str(result)[:500])
     return None
 
+def make_video_public(video_id):
+    access_token = get_youtube_access_token()
+    if not access_token:
+        return False
+    
+    url = f'https://www.googleapis.com/youtube/v3/videos?part=status&id={video_id}'
+    headers = {'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json'}
+    body = {
+        'status': {
+            'privacyStatus': 'public',
+            'selfDeclaredMadeForKids': False,
+            'containsSyntheticMedia': True
+        }
+    }
+    
+    r = requests.put(url, headers=headers, json=body, timeout=30)
+    return r.status_code == 200
+
 print('=== Starting Upload Process ===')
 send_message('⏳ Video download ho rahi hai, please wait...')
 
@@ -110,20 +117,18 @@ if not download_from_telegram(FILE_ID, video_path):
 
 print('Video Downloaded. Size: ' + str(os.path.getsize(video_path)) + ' bytes')
 
-# 🚨 NAYA: ASS SUBTITLE METHOD SE TEXT ADD KARO
+# 🚨 Text Add Karne Wala Part
 send_message('⏳ Video mein Like & Subscribe animation add ki ja rahi hai...')
 final_video_path = 'final_video.mp4'
 
-# Video ki total duration nikaalo
 result = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path], capture_output=True, text=True)
 try:
     duration = float(result.stdout.strip())
 except:
-    duration = 10.0 # Fallback
+    duration = 10.0
 
-start_time = max(0, duration - 2.0) # Last 2 seconds mein text aayega
+start_time = max(0, duration - 2.0)
 
-# ASS subtitle file banao
 ass_content = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1080
@@ -141,29 +146,32 @@ Dialogue: 0,{start_time},{duration},Default,,0,0,0,,LIKE & SUBSCRIBE
 with open('subs.ass', 'w') as f:
     f.write(ass_content)
 
-# FFmpeg command jo ASS subtitle overlay karegi
 ffmpeg_cmd = [
     'ffmpeg', '-y', '-i', video_path,
     '-vf', 'ass=subs.ass',
     '-c:a', 'copy', final_video_path
 ]
 
-result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-if result.returncode != 0:
-    print('FFmpeg error:')
-    print(result.stderr[:1000])
-    send_message('❌ Video par text add nahi ho paya. GitHub logs check karo.')
-    exit(1)
+subprocess.run(ffmpeg_cmd, capture_output=True)
 
-print('Animation added. Final size: ' + str(os.path.getsize(final_video_path)) + ' bytes')
-
+# Upload Video
 send_message('⏳ Video YouTube par upload ho rahi hai...')
 yt_id = upload_to_youtube(final_video_path, TITLE, DESCRIPTION, TAGS)
 
 if yt_id:
     link = 'https://youtu.be/' + yt_id
     print('Upload Success: ' + link)
-    send_message(f'✅ Video YouTube par upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ye abhi Private hai. 5 minute baad ye apne aap Public ho jayegi!')
+    send_message(f'✅ Video YouTube par UNLISTED upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ab ye 3 minute tak unlisted rahegi, aap ise dekh/edit kar sakte hain. 3 minute baad ye apne aap Public ho jayegi.')
+    
+    # 🚨 3 MINUTE WAIT KARO
+    print("Waiting for 3 minutes to make video public...")
+    time.sleep(180) # 180 seconds = 3 minutes
+    
+    # Public karo
+    if make_video_public(yt_id):
+        send_message(f'✅ 3 minute poore ho gaye! Video ab PUBLIC ho gayi hai.\nLink: {link}')
+    else:
+        send_message(f'❌ Video public karne mein error aaya. Kripya manually YouTube Studio se public karein.\nLink: {link}')
 else:
     send_message('❌ YouTube upload fail ho gaya. GitHub logs check karo.')
 
