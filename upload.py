@@ -110,11 +110,11 @@ if not download_from_telegram(FILE_ID, video_path):
 
 print('Video Downloaded. Size: ' + str(os.path.getsize(video_path)) + ' bytes')
 
-# 🚨 NAYA: LIKE & SUBSCRIBE ANIMATION ADD KARO
+# 🚨 NAYA: ASS SUBTITLE METHOD SE TEXT ADD KARO
 send_message('⏳ Video mein Like & Subscribe animation add ki ja rahi hai...')
 final_video_path = 'final_video.mp4'
 
-# Video ki total duration nikaalo taaki end mein text laga sakein
+# Video ki total duration nikaalo
 result = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path], capture_output=True, text=True)
 try:
     duration = float(result.stdout.strip())
@@ -123,14 +123,38 @@ except:
 
 start_time = max(0, duration - 2.0) # Last 2 seconds mein text aayega
 
-# FFmpeg command jo end mein text overlay karegi
+# ASS subtitle file banao
+ass_content = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,120,&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5,3,5,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,{start_time},{duration},Default,,0,0,0,,LIKE & SUBSCRIBE
+"""
+
+with open('subs.ass', 'w') as f:
+    f.write(ass_content)
+
+# FFmpeg command jo ASS subtitle overlay karegi
 ffmpeg_cmd = [
     'ffmpeg', '-y', '-i', video_path,
-    '-vf', f"drawtext=text='LIKE & SUBSCRIBE':fontcolor=yellow:fontsize=60:x=(w-text_w)/2:y=(h-text_h)/2:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:box=1:boxcolor=black@0.5:boxborderw=10:enable='gte(t,{start_time})'",
+    '-vf', 'ass=subs.ass',
     '-c:a', 'copy', final_video_path
 ]
 
-subprocess.run(ffmpeg_cmd, capture_output=True)
+result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+if result.returncode != 0:
+    print('FFmpeg error:')
+    print(result.stderr[:1000])
+    send_message('❌ Video par text add nahi ho paya. GitHub logs check karo.')
+    exit(1)
+
 print('Animation added. Final size: ' + str(os.path.getsize(final_video_path)) + ' bytes')
 
 send_message('⏳ Video YouTube par upload ho rahi hai...')
