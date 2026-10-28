@@ -2,6 +2,7 @@ import os
 import requests
 import json
 from datetime import datetime, timedelta
+import subprocess
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
@@ -61,7 +62,7 @@ def upload_to_youtube(video_path, title, description, tags):
     headers = {'Authorization': 'Bearer ' + access_token}
 
     status_body = {
-        'privacyStatus': 'private', # 🚨 Schedule ke liye private zaroori hai
+        'privacyStatus': 'private',
         'selfDeclaredMadeForKids': False,
         'containsSyntheticMedia': True
     }
@@ -107,13 +108,38 @@ if not download_from_telegram(FILE_ID, video_path):
     send_message('❌ Video download fail ho gaya.')
     exit(1)
 
+print('Video Downloaded. Size: ' + str(os.path.getsize(video_path)) + ' bytes')
+
+# 🚨 NAYA: LIKE & SUBSCRIBE ANIMATION ADD KARO
+send_message('⏳ Video mein Like & Subscribe animation add ki ja rahi hai...')
+final_video_path = 'final_video.mp4'
+
+# Video ki total duration nikaalo taaki end mein text laga sakein
+result = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', video_path], capture_output=True, text=True)
+try:
+    duration = float(result.stdout.strip())
+except:
+    duration = 10.0 # Fallback
+
+start_time = max(0, duration - 2.0) # Last 2 seconds mein text aayega
+
+# FFmpeg command jo end mein text overlay karegi
+ffmpeg_cmd = [
+    'ffmpeg', '-y', '-i', video_path,
+    '-vf', f"drawtext=text='LIKE & SUBSCRIBE':fontcolor=yellow:fontsize=60:x=(w-text_w)/2:y=(h-text_h)/2:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:box=1:boxcolor=black@0.5:boxborderw=10:enable='gte(t,{start_time})'",
+    '-c:a', 'copy', final_video_path
+]
+
+subprocess.run(ffmpeg_cmd, capture_output=True)
+print('Animation added. Final size: ' + str(os.path.getsize(final_video_path)) + ' bytes')
+
 send_message('⏳ Video YouTube par upload ho rahi hai...')
-yt_id = upload_to_youtube(video_path, TITLE, DESCRIPTION, TAGS)
+yt_id = upload_to_youtube(final_video_path, TITLE, DESCRIPTION, TAGS)
 
 if yt_id:
     link = 'https://youtu.be/' + yt_id
     print('Upload Success: ' + link)
-    send_message(f'✅ Video YouTube par upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ye abhi Private hai. YouTube Studio se edit karlo, 5 minute baad ye apne aap Public ho jayegi!')
+    send_message(f'✅ Video YouTube par upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ye abhi Private hai. 5 minute baad ye apne aap Public ho jayegi!')
 else:
     send_message('❌ YouTube upload fail ho gaya. GitHub logs check karo.')
 
