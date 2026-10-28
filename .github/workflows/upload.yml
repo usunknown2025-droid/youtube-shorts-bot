@@ -34,7 +34,11 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: Install dependencies
+      # 🚨 NAYA: FFmpeg Install karo
+      - name: Install FFmpeg and Fonts
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto
+      
+      - name: Install Python Dependencies
         run: pip install requests
       
       - name: Run Upload Script
