@@ -24,6 +24,10 @@ on:
         required: false
         default: ''
         type: string
+      channel:
+        required: true
+        default: '1'
+        type: string
 
 jobs:
   upload:
@@ -34,11 +38,10 @@ jobs:
         with:
           python-version: '3.11'
       
-      # 🚨 NAYA: FFmpeg Install karo
-      - name: Install FFmpeg and Fonts
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto
-      
-      - name: Install Python Dependencies
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        
+      - name: Install dependencies
         run: pip install requests
       
       - name: Run Upload Script
@@ -51,6 +54,12 @@ jobs:
           DESCRIPTION: ${{ github.event.inputs.description }}
           TAGS: ${{ github.event.inputs.tags }}
           SCHEDULE_TIME: ${{ github.event.inputs.schedule_time }}
+          CHANNEL: ${{ github.event.inputs.channel }}
+          # Channel 1 Tokens
           YT_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YT_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YT_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          # Channel 2 Tokens (Naya)
+          YT_CLIENT_ID_2: ${{ secrets.YT_CLIENT_ID_2 }}
+          YT_CLIENT_SECRET_2: ${{ secrets.YT_CLIENT_SECRET_2 }}
+          YT_REFRESH_TOKEN_2: ${{ secrets.YT_REFRESH_TOKEN_2 }}
