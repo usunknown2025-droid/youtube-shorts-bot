@@ -19,12 +19,12 @@ if CHANNEL == '2':
     YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID_2', '').strip()
     YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET_2', '').strip()
     YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN_2', '').strip()
-    print("🚀 Uploading to Channel 2 (Tiny Workers)")
+    print("🚀 Uploading to Channel 2")
 else:
     YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '').strip()
     YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '').strip()
     YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN', '').strip()
-    print("🚀 Uploading to Channel 1 (Miniverse)")
+    print("🚀 Uploading to Channel 1")
 
 def send_message(text):
     requests.post(
@@ -69,11 +69,28 @@ def upload_to_youtube(video_path, title, description, tags):
     url = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status'
     headers = {'Authorization': 'Bearer ' + access_token}
 
+    # 🚨 DEFAULT: 3 MINUTE BAAD PUBLIC HOGA
+    publish_time = datetime.utcnow() + timedelta(minutes=3)
+    
+    # Agar user ne schedule time diya hai, toh usko use karo
+    if SCHEDULE_TIME:
+        try:
+            clean_time = SCHEDULE_TIME.replace('Z', '+00:00')
+            publish_time = datetime.fromisoformat(clean_time)
+            print(f"Using scheduled time: {publish_time}")
+        except Exception as e:
+            print(f'Schedule time parse error: {e}. Using default 3 mins.')
+
+    # Format: 2026-10-29T18:00:00Z
+    publish_at_str = publish_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+
     status_body = {
-        'privacyStatus': 'unlisted',
+        'privacyStatus': 'private', # Private rahega tab tak
+        'publishAt': publish_at_str, # Ye time aate hi khud public ho jayega
         'selfDeclaredMadeForKids': False,
         'containsSyntheticMedia': True
     }
+    print(f"Video will auto-publish at: {publish_at_str}")
 
     metadata = {
         'snippet': {
@@ -96,15 +113,6 @@ def upload_to_youtube(video_path, title, description, tags):
         return result['id']
     print('YouTube upload error: ' + str(result)[:500])
     return None
-
-def make_video_public(video_id):
-    access_token = get_youtube_access_token()
-    if not access_token: return False
-    url = f'https://www.googleapis.com/youtube/v3/videos?part=status&id={video_id}'
-    headers = {'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json'}
-    body = {'status': {'privacyStatus': 'public', 'selfDeclaredMadeForKids': False, 'containsSyntheticMedia': True}}
-    r = requests.put(url, headers=headers, json=body, timeout=30)
-    return r.status_code == 200
 
 print('=== Starting Upload Process ===')
 send_message('⏳ Video download ho rahi hai, please wait...')
@@ -150,13 +158,7 @@ yt_id = upload_to_youtube(final_video_path, TITLE, DESCRIPTION, TAGS)
 if yt_id:
     link = 'https://youtu.be/' + yt_id
     print('Upload Success: ' + link)
-    send_message(f'✅ Video YouTube par UNLISTED upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ab ye 3 minute tak unlisted rahegi, 3 minute baad ye apne aap Public ho jayegi.')
-    
-    import time
-    time.sleep(180)
-    
-    if make_video_public(yt_id):
-        send_message(f'✅ 3 minute poore ho gaye! Video ab PUBLIC ho gayi hai.\nLink: {link}')
+    send_message(f'✅ Video YouTube par upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ye abhi Private hai. YouTube khud isko 3 minute baad Public kar dega (ya aapke diye hue time par).')
 else:
     send_message('❌ YouTube upload fail ho gaya. GitHub logs check karo.')
 
