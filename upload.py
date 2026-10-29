@@ -3,7 +3,6 @@ import requests
 import json
 from datetime import datetime, timedelta
 import subprocess
-import time
 
 BOT_TOKEN = os.environ['BOT_TOKEN']
 CHAT_ID = os.environ['CHAT_ID']
@@ -13,10 +12,19 @@ DESCRIPTION = os.environ.get('DESCRIPTION', '')
 TAGS_STR = os.environ.get('TAGS', '')
 TAGS = [t.strip() for t in TAGS_STR.split(',') if t.strip()]
 SCHEDULE_TIME = os.environ.get('SCHEDULE_TIME', '').strip() 
+CHANNEL = os.environ.get('CHANNEL', '1').strip()
 
-YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '').strip()
-YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '').strip()
-YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN', '').strip()
+# 🚨 CHANNEL KE HISAAB SE TOKEN SELECT KARO
+if CHANNEL == '2':
+    YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID_2', '').strip()
+    YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET_2', '').strip()
+    YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN_2', '').strip()
+    print("🚀 Uploading to Channel 2 (Tiny Workers)")
+else:
+    YT_CLIENT_ID = os.environ.get('YT_CLIENT_ID', '').strip()
+    YT_CLIENT_SECRET = os.environ.get('YT_CLIENT_SECRET', '').strip()
+    YT_REFRESH_TOKEN = os.environ.get('YT_REFRESH_TOKEN', '').strip()
+    print("🚀 Uploading to Channel 1 (Miniverse)")
 
 def send_message(text):
     requests.post(
@@ -37,6 +45,7 @@ def get_youtube_access_token():
     result = r.json()
     if 'access_token' in result:
         return result['access_token']
+    print('Token error: ' + str(result))
     return None
 
 def download_from_telegram(file_id, path):
@@ -60,9 +69,8 @@ def upload_to_youtube(video_path, title, description, tags):
     url = 'https://www.googleapis.com/upload/youtube/v3/videos?uploadType=multipart&part=snippet,status'
     headers = {'Authorization': 'Bearer ' + access_token}
 
-    # 🚨 Yahan hum video ko PEHLE UNLISTED upload kar rahe hain
     status_body = {
-        'privacyStatus': 'unlisted', 
+        'privacyStatus': 'unlisted',
         'selfDeclaredMadeForKids': False,
         'containsSyntheticMedia': True
     }
@@ -91,19 +99,10 @@ def upload_to_youtube(video_path, title, description, tags):
 
 def make_video_public(video_id):
     access_token = get_youtube_access_token()
-    if not access_token:
-        return False
-    
+    if not access_token: return False
     url = f'https://www.googleapis.com/youtube/v3/videos?part=status&id={video_id}'
     headers = {'Authorization': 'Bearer ' + access_token, 'Content-Type': 'application/json'}
-    body = {
-        'status': {
-            'privacyStatus': 'public',
-            'selfDeclaredMadeForKids': False,
-            'containsSyntheticMedia': True
-        }
-    }
-    
+    body = {'status': {'privacyStatus': 'public', 'selfDeclaredMadeForKids': False, 'containsSyntheticMedia': True}}
     r = requests.put(url, headers=headers, json=body, timeout=30)
     return r.status_code == 200
 
@@ -115,9 +114,6 @@ if not download_from_telegram(FILE_ID, video_path):
     send_message('❌ Video download fail ho gaya.')
     exit(1)
 
-print('Video Downloaded. Size: ' + str(os.path.getsize(video_path)) + ' bytes')
-
-# 🚨 Text Add Karne Wala Part
 send_message('⏳ Video mein Like & Subscribe animation add ki ja rahi hai...')
 final_video_path = 'final_video.mp4'
 
@@ -146,32 +142,21 @@ Dialogue: 0,{start_time},{duration},Default,,0,0,0,,LIKE & SUBSCRIBE
 with open('subs.ass', 'w') as f:
     f.write(ass_content)
 
-ffmpeg_cmd = [
-    'ffmpeg', '-y', '-i', video_path,
-    '-vf', 'ass=subs.ass',
-    '-c:a', 'copy', final_video_path
-]
+subprocess.run(['ffmpeg', '-y', '-i', video_path, '-vf', 'ass=subs.ass', '-c:a', 'copy', final_video_path], capture_output=True)
 
-subprocess.run(ffmpeg_cmd, capture_output=True)
-
-# Upload Video
-send_message('⏳ Video YouTube par upload ho rahi hai...')
+send_message(f'⏳ Video {CHANNEL} par upload ho rahi hai...')
 yt_id = upload_to_youtube(final_video_path, TITLE, DESCRIPTION, TAGS)
 
 if yt_id:
     link = 'https://youtu.be/' + yt_id
     print('Upload Success: ' + link)
-    send_message(f'✅ Video YouTube par UNLISTED upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ab ye 3 minute tak unlisted rahegi, aap ise dekh/edit kar sakte hain. 3 minute baad ye apne aap Public ho jayegi.')
+    send_message(f'✅ Video YouTube par UNLISTED upload ho gayi hai!\n\nTitle: {TITLE}\nLink: {link}\n\n⏳ Ab ye 3 minute tak unlisted rahegi, 3 minute baad ye apne aap Public ho jayegi.')
     
-    # 🚨 3 MINUTE WAIT KARO
-    print("Waiting for 3 minutes to make video public...")
-    time.sleep(180) # 180 seconds = 3 minutes
+    import time
+    time.sleep(180)
     
-    # Public karo
     if make_video_public(yt_id):
         send_message(f'✅ 3 minute poore ho gaye! Video ab PUBLIC ho gayi hai.\nLink: {link}')
-    else:
-        send_message(f'❌ Video public karne mein error aaya. Kripya manually YouTube Studio se public karein.\nLink: {link}')
 else:
     send_message('❌ YouTube upload fail ho gaya. GitHub logs check karo.')
 
